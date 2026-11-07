@@ -252,7 +252,7 @@ spack build-env cp2k@2023.2 -- bash`,
           { type: "h3", text: "自己编依赖：先装库，再装 CP2K" },
           {
             type: "p",
-            text: "课程资料包里留了一份 Intel 全家桶的完整编译记录（CP2K 7.1 + ELPA + libint + libxc + libxsmm）。它的顺序值得照抄：**先确定 MPI 与编译器，再装数学库与 FFTW，最后按 libxc → libint → ELPA → libxsmm 的顺序装可选库**。原因很实际：libint 要链接 libxc 的接口，ELPA 要链接 ScaLAPACK，libxsmm 只依赖编译器；顺序反了，后面每一步都要回头重编前面的库。",
+            text: "课程资料包里留了一份 Intel 全家桶的完整编译记录（CP2K 7.1 + ELPA + libint + libxc + libxsmm）。它的顺序值得照抄：**先确定 MPI 与编译器，再装数学库与 FFTW，最后按 libxc → libint → ELPA → libxsmm 的顺序装可选库**。原因很实际：libint 可以链接 libxc 复用泛函积分（可选，不链接也能编），ELPA 必须链接 ScaLAPACK，libxsmm 只依赖编译器；顺序反了，后面每一步都要回头重编前面的库。",
           },
           {
             type: "code",
