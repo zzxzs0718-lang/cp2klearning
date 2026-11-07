@@ -3,424 +3,614 @@
   window.CONTENT["ch09"] = {
     id: "ch09",
     num: 9,
-    part: "DFT 核心",
-    title: "SCF 收敛与 OT：让电子密度定下来",
-    subtitle: "混合、smearing、OT 与那套「不收敛就先看结构」的排查顺序",
-    hours: 2.5,
-    level: "进阶",
+    part: "结构与振动",
+    title: "几何优化、晶胞优化与过渡态",
+    subtitle: "让原子和晶胞走到能量极小，再沿反应路径找到鞍点",
+    hours: 3,
+    level: "中级",
     intro:
-      "前面几章把能量表达式搭好了，剩下的问题是把它解出来。Kohn–Sham 方程是自洽的：密度决定势，势决定轨道，轨道又决定密度。这一章讲 CP2K 怎么把这条循环推到不动点：mixing 与 DIIS 怎么调、金属为什么要 smearing、OT 与对角化到底差在哪，以及卡住时按什么顺序排查。",
+      "电子结构算得再准，也要有可信的结构。这一章做三件事：固定晶胞优化原子（GEO_OPT）、连晶胞一起优化（CELL_OPT）、以及沿反应路径找过渡态（CI-NEB、DIMER）。它们共用一套逻辑——用力和应力把结构推向驻点，再用频率确认你到达的是极小还是鞍点。",
     goals: [
-      "说清 SCF 迭代在做什么，以及 EPS_SCF 与 MAX_SCF 分别控制什么",
-      "根据体系类型选择 &MIXING 方案并调整 ALPHA、BETA 等参数",
-      "判断什么时候需要 smearing 与 ADDED_MOS，并写出金属体系的 SCF 设置",
-      "区分 &SCF%OT 与 &SCF%DIAGONALIZATION%OT，按失败症状给出排查顺序",
+      "写出可运行的 GEO_OPT 与 CELL_OPT 输入，并读懂 OPT 表的四个判据",
+      "在 BFGS、LBFGS、CG 之间按体系大小与稳定性做选择",
+      "固定 slab 底层或指定方向，做有物理意义的约束优化",
+      "用 CI-NEB 找过渡态，并判断结果是否可信",
     ],
     sections: [
       {
         id: "9.1",
-        title: "SCF 在迭代什么",
+        title: "优化之前，先确认三件事",
         blocks: [
           {
             type: "p",
-            text: "给定一组轨道，可以算出密度；密度决定 Hartree 势与交换关联势；势进入哈密顿量，解出新的轨道；新轨道又给出新密度。如果新密度和旧密度一样，就自洽了。SCF 做的就是把这条循环推到不动点。",
+            text: "优化不是在坏结构上「自动修好」。如果初始结构有原子重叠、缺失的氢、错误的配位或严重畸变的晶胞，第一步的力就会大到离谱，SCF 先崩，或者原子直接飞走。所以在写 `RUN_TYPE GEO_OPT` 之前，先做三件事。",
+          },
+          {
+            type: "steps",
+            items: [
+              { t: "① 单点能收敛", d: "先用 RUN_TYPE ENERGY 在起点跑通 SCF，确认结构没有病、收敛阈值够用。" },
+              { t: "② 估机时", d: "单点耗时 × 预计步数（几十到几百）。一步优化可能包含多次力评估。" },
+              { t: "③ 看结构", d: "用 VMD/Jmol 检查键长、配位、周期边界处有没有重叠或过大空隙。" },
+            ],
           },
           {
             type: "p",
-            text: "问题在于，直接把「输出密度」当作下一次的输入，几乎总是不收敛：误差会在迭代间放大、振荡，甚至发散。所以实际用的是**混合**（mixing）：新输入取旧输入与输出密度的加权组合，权重 α 通常小于 1。",
-          },
-          {
-            type: "formula",
-            tex: "\\rho_{\\mathrm{in}}^{n+1} = \\rho_{\\mathrm{in}}^{n} + \\alpha\\,(\\rho_{\\mathrm{out}}^{n} - \\rho_{\\mathrm{in}}^{n})",
-            caption: "最简单的线性混合；α 就是 &MIXING 的 ALPHA，默认 0.4",
-          },
-          {
-            type: "p",
-            text: "更聪明的做法是用历史信息外推：Pulay、Broyden 这类方法记住前几步的残差，构造一个近似 Jacobian 的逆，把残差直接压掉。这就是通常说的 **DIIS** 类加速。CP2K 把这些方案都放在 `&SCF/&MIXING` 下，用 METHOD 选。",
+            text: "还有一条容易被忽略：**优化用的电子结构设置至少要和单点一样严，通常更严**。力是能量对坐标的导数，SCF 噪声会被放大；`EPS_SCF` 太松、`CUTOFF` 太低，都会让优化在极小点附近来回震荡。",
           },
           {
             type: "callout",
-            kind: "info",
-            title: "两条完全不同的求解路线",
-            text: "对角化路线每步要解一次本征值问题，再做密度混合；OT 路线干脆不做对角化，直接把电子能量对轨道做变分最小化。两条路线共享 EPS_SCF 与 MAX_SCF 这两个旋钮，但内部参数完全不同，第 9.5 节专门区分。",
+            kind: "warn",
+            title: "0 K 优化不等于有限温结构",
+            text: "GEO_OPT/CELL_OPT 找到的是势能面驻点，不含零点能与热膨胀。拿它和室温实验晶格常数比较时，差 1% 量级是正常的；要做有限温结构，得走 MD 或准简谐路线。",
           },
         ],
       },
       {
         id: "9.2",
-        title: "收敛判据：EPS_SCF 与 MAX_SCF",
+        title: "GEO_OPT：四个判据一起看",
         blocks: [
           {
             type: "p",
-            text: "EPS_SCF 是收敛阈值，默认 `1.0E-5`；MAX_SCF 是允许的最大迭代步数，默认 50。每一次迭代，程序计算一个误差量（与密度矩阵的变化相关），小于 EPS_SCF 就判定收敛。两个参数一个管「多准」，一个管「最多试多久」。",
+            text: "下面是一份最小可用的优化输入。`&MOTION` 挂在 `&FORCE_EVAL` 下面，`&GEO_OPT` 里放优化器与收敛判据；电子结构部分和单点完全一样。",
+          },
+          {
+            type: "code",
+            lang: "cp2k",
+            title: "geo_opt.inp",
+            text: `&GLOBAL
+  PROJECT co_ads
+  RUN_TYPE GEO_OPT
+&END GLOBAL
+
+&FORCE_EVAL
+  METHOD Quickstep
+  &DFT
+    BASIS_SET_FILE_NAME BASIS_MOLOPT
+    POTENTIAL_FILE_NAME GTH_POTENTIALS
+    &MGRID
+      CUTOFF 400
+      REL_CUTOFF 60
+    &END MGRID
+    &SCF
+      EPS_SCF 1.0E-6
+      MAX_SCF 100
+      &OT T
+        MINIMIZER CG
+        PRECONDITIONER FULL_SINGLE_INVERSE
+      &END OT
+      &OUTER_SCF T
+        EPS_SCF 1.0E-5
+        MAX_SCF 20
+      &END OUTER_SCF
+    &END SCF
+    &XC
+      &XC_FUNCTIONAL PBE
+      &END XC_FUNCTIONAL
+      &VDW_POTENTIAL
+        &PAIR_POTENTIAL
+          TYPE DFTD3(BJ)
+          REFERENCE_FUNCTIONAL PBE
+        &END PAIR_POTENTIAL
+      &END VDW_POTENTIAL
+    &END XC
+  &END DFT
+  &SUBSYS
+    &CELL
+      ABC 12.0 12.0 20.0
+      PERIODIC XY
+    &END CELL
+    &COORD
+      C  0.0000  0.0000  8.0000
+      O  0.0000  0.0000  9.1500
+    &END COORD
+    &KIND C
+      BASIS_SET DZVP-MOLOPT-GTH
+      POTENTIAL GTH-PBE-q4
+    &END KIND
+    &KIND O
+      BASIS_SET DZVP-MOLOPT-GTH
+      POTENTIAL GTH-PBE-q6
+    &END KIND
+  &END SUBSYS
+  &MOTION
+    &GEO_OPT
+      TYPE MINIMIZATION
+      OPTIMIZER BFGS
+      MAX_ITER 200
+      MAX_DR 3.0E-3
+      RMS_DR 1.5E-3
+      MAX_FORCE 4.5E-4
+      RMS_FORCE 3.0E-4
+    &END GEO_OPT
+  &END MOTION
+&END FORCE_EVAL`,
           },
           {
             type: "table",
-            head: ["关键词", "默认值", "含义"],
+            head: ["判据", "含义", "单位", "常规值"],
             rows: [
-              ["EPS_SCF", "1.0E-5", "SCF 收敛阈值，越小越准也越贵"],
-              ["MAX_SCF", "50", "单次 SCF 的最大迭代步数"],
-              ["SCF_GUESS", "ATOMIC", "初始猜测：用各元素的原子密度拼起来"],
-              ["IGNORE_CONVERGENCE_FAILURE", "F", "未收敛时是否继续，默认不允许"],
-              ["LEVEL_SHIFT", "0", "给虚轨道加一个平移，帮助难收敛体系"],
+              ["`MAX_DR`", "最大原子位移", "Bohr", "3.0E-3"],
+              ["`RMS_DR`", "均方位移", "Bohr", "1.5E-3"],
+              ["`MAX_FORCE`", "最大力分量", "Hartree/Bohr", "4.5E-4"],
+              ["`RMS_FORCE`", "均方力", "Hartree/Bohr", "3.0E-4"],
             ],
-            caption: "&SCF 里最常动的几个参数",
+            caption: "BFGS/CG 下必须四个都满足；只看到力达标而位移没达标，仍不算收敛。",
           },
           {
             type: "p",
-            text: "从 CP2K 2024.1 起，**SCF 不收敛默认直接中止**。达到 MAX_SCF 时 Convergence 列仍未满足 EPS_SCF，程序就 ABORT，并在提示里建议你设置 IGNORE_CONVERGENCE_FAILURE。别把它当成默认选项。",
+            text: "输出里的 `OPT|` 表每行给出步数、总能量、最大/均方梯度、最大/均方位移与信任半径。判断收敛看判据列，不看总能量——中间步能量可以上升，最后一步也可能有微小上升，这都正常。若最后一步能量上升且幅度可疑，用频率分析确认它到底是不是极小点。",
           },
           {
             type: "callout",
-            kind: "danger",
-            title: "打开忽略开关的代价",
-            text: "手册用 Danger 框写这件事：强行忽略会让后续性质失去意义——占据数可能错、能带可能错、响应性质可能非物理，动力学里原子还可能飞掉。它只能作为「先跑完看看」的最后手段，绝不能进生产流程。",
-          },
-          {
-            type: "p",
-            text: "反过来，EPS_SCF 也不是越小越好。你要分辨 1e-6 Ry 的能量差，SCF 至少要比它紧一到两个量级；但如果目标只是看结构，`1.0E-6` 已经足够。把判据写成数字，和你要报告的量对齐。",
+            kind: "info",
+            title: "MAX_ITER 到了还没收敛怎么办",
+            text: "不要直接把 `MAX_ITER` 翻十倍。先看每一步的力是否在下降：下降慢但单调，可以加步数；来回震荡，换优化器或减小信任半径；力不降反升，回去查 SCF 噪声与结构。",
           },
         ],
       },
       {
         id: "9.3",
-        title: "混合：&MIXING 与 DIIS",
+        title: "优化器：BFGS、LBFGS 与 CG",
         blocks: [
           {
             type: "p",
-            text: "CP2K 的默认方案是 **DIRECT_P_MIXING**：直接把新密度按 ALPHA 混进去。它保守、稳，但对金属、大体系、带真空层的 slab 往往太慢。此时换 Broyden 或 Pulay，用历史步数加速。",
+            text: "三个优化器不是「谁更高级」，而是三种不同的取舍。BFGS 用完整 Hessian 近似，中小体系收敛快；LBFGS 只保留有限步历史，内存省，适合大体系；CG 每步只沿梯度方向做线搜索，最稳健但一步要多次力评估。",
+          },
+          {
+            type: "compare",
+            left: {
+              title: "BFGS（默认）",
+              items: [
+                "中小体系首选，步数少",
+                "用完整 Hessian 近似，内存随原子数增长",
+                "震荡时先减小 TRUST_RADIUS",
+                "可用 USE_MODEL_HESSIAN 减少步数",
+              ],
+            },
+            right: {
+              title: "LBFGS / CG",
+              items: [
+                "LBFGS 省内存，大体系友好，但判据可能提前宣布收敛",
+                "CG 最稳健，适合差初始结构与噪声力",
+                "CG 每步线搜索多次力评估，单步更贵",
+                "CG 线搜索可换 2PNT/GOLD/FIT 控制成本",
+              ],
+            },
           },
           {
             type: "p",
-            text: "**ALPHA** 是新密度所占比例，默认 0.4；调小更稳但更慢。**BETA** 是 Kerker 阻尼参数，默认 0.5（单位 bohr 的倒数），作用是压制长波段的电荷振荡（charge sloshing）——金属与导体表面最容易出这个问题。",
-          },
-          {
-            type: "formula",
-            tex: "\\rho_{\\mathrm{mix}}(G) = \\rho_{\\mathrm{in}} + \\alpha\\,\\frac{G^2}{G^2+\\beta^2}\\,(\\rho_{\\mathrm{out}}-\\rho_{\\mathrm{in}})",
-            caption: "Kerker 阻尼：长波（G 小）的修正被压掉，短波照常混合",
-          },
-          {
-            type: "code",
-            lang: "cp2k",
-            title: "Broyden 混合（片段）",
-            text: `&SCF
-  EPS_SCF 1.0E-6
-  MAX_SCF 100
-  &MIXING
-    METHOD BROYDEN_MIXING
-    ALPHA 0.3
-    BETA 0.5
-    NBUFFER 8
-  &END MIXING
-&END SCF`,
-          },
-          {
-            type: "table",
-            head: ["METHOD", "特点", "适用"],
-            rows: [
-              ["DIRECT_P_MIXING", "只用当前步，最简单最稳", "默认；绝缘体、小体系"],
-              ["KERKER_MIXING", "带 Kerker 阻尼的线性混合", "简单金属、slab"],
-              ["BROYDEN_MIXING", "用历史残差近似 Jacobian", "难收敛体系的主力"],
-              ["PULAY_MIXING", "另一种 DIIS 实现", "与 Broyden 互为备选"],
-              ["MULTISECANT_MIXING", "多割线加速", "特殊难例"],
-            ],
-            caption: "&MIXING/METHOD 的常用取值",
+            text: "课程里的经验是：超大体系用 LBFGS，中等体系用 BFGS，结构很差时用 CG。LBFGS 有一条要特别注意：它可能在其他判据还没满足时就宣布 `CONVERGED`，并写出 `iterate.dat`；如果你不放心，可以同时看 `MAX_FORCE` 与位移，或改用 BFGS 复核。",
           },
           {
             type: "callout",
             kind: "tip",
-            title: "调参顺序",
-            text: "先降 ALPHA（0.4 → 0.2 → 0.1），再换 Broyden，再加 NBUFFER。不要一上来就把 ALPHA 压到 0.01：那会让 SCF 慢到你以为它卡死了。",
+            title: "震荡时的最小改动",
+            text: "先别换优化器。把 BFGS 的 `TRUST_RADIUS` 调小（如 0.1），或者把 `EPS_SCF` 收紧一个数量级，往往就能解决「最后 0.01 eV 反复横跳」的问题。",
           },
         ],
       },
       {
         id: "9.4",
-        title: "金属与 smearing",
+        title: "约束：固定 slab 底层，放开表面",
         blocks: [
           {
             type: "p",
-            text: "金属的费米面会切过能带，占据数在 0 与 1 之间跳变。固定整数占据会让 SCF 在两个几乎简并的解之间来回振荡，永不收敛。**smearing** 的做法是允许分数占据，用费米–狄拉克分布把占据在费米能附近抹开，相当于给电子一个有限温度。",
-          },
-          {
-            type: "p",
-            text: "&SMEAR 打开后，METHOD 选展宽函数（FERMI_DIRAC 或 GAUSSIAN 等），温度或宽度由 ELECTRONIC_TEMPERATURE 与 SIGMA 控制。默认 ELECTRONIC_TEMPERATURE 是 300 K，SIGMA 是 $2\\times10^{-3}$ Ha。对金属，常用几百到几千 K 的温度先把 SCF 稳住。",
+            text: "表面吸附计算里，基底不是刚体：靠近吸附物的几层会弛豫，底层则近似体相。全固定会高估吸附能，全放开又会让 slab 整体漂移。标准做法是固定底部若干层，放开表面两层。",
           },
           {
             type: "code",
             lang: "cp2k",
-            title: "金属体系：smearing + 额外空带（片段）",
-            text: `&SCF
-  ADDED_MOS 20
-  EPS_SCF 1.0E-6
-  MAX_SCF 100
-  &SMEAR ON
-    METHOD FERMI_DIRAC
-    ELECTRONIC_TEMPERATURE 500
-  &END SMEAR
-  &MIXING
-    METHOD BROYDEN_MIXING
-    ALPHA 0.3
-  &END MIXING
-&END SCF`,
+            title: "固定底层 + LBFGS 优化",
+            text: `&MOTION
+  &CONSTRAINT
+    &FIXED_ATOMS
+      COMPONENTS_TO_FIX XYZ
+      LIST 1..54
+      LIST 289..324
+    &END FIXED_ATOMS
+  &END CONSTRAINT
+  &GEO_OPT
+    OPTIMIZER LBFGS
+    MAX_ITER 400
+    MAX_FORCE 6.0E-4
+    &LBFGS
+      MAX_H_RANK 30
+    &END LBFGS
+  &END GEO_OPT
+&END MOTION`,
           },
           {
             type: "p",
-            text: "**ADDED_MOS** 是给每个自旋通道额外加的空带数，默认 0。展宽之后，费米能附近的空带也有可观占据，不加空带就等于把电子硬塞进被截断的能带里，输出会警告最高带仍有占据。设成正数表示加几条，设成 -1 表示原子基组里所有可用态，设成 AUTO 则让程序为有限温 k 点 OT 自动选择缓冲。",
+            text: "`LIST` 里的编号是 `&COORD` 里的原子顺序，不是元素序号，也不是可视化软件里显示的序号。**改结构、重排坐标后一定要重新核对编号**，否则你固定的可能是吸附物本身。`COMPONENTS_TO_FIX XYZ` 表示三个方向都固定；只想固定 z 方向时写 `Z`。",
+          },
+          {
+            type: "p",
+            text: "除了固定原子，`&CONSTRAINT/&COLLECTIVE` 可以约束集体变量（键长、配位数、角度等），配合 `&COLVAR` 定义变量与目标值。它适合「扫描一个反应坐标」或「保持某个配位环境」的场景；用之前先想清楚：约束会改变势能面，得到的能量不是自由能。",
           },
           {
             type: "callout",
             kind: "warn",
-            title: "温度不是物理结论",
-            text: "Fermi–Dirac 展宽下的能量是有限温自由能。要和 0 K 的基态结果比较，必须把温度或 SIGMA 系统降到 0 并做外推。直接拿 1000 K 的能量和别人的 0 K 数据比，是没有意义的。",
+            title: "固定太多 = 算了个假表面",
+            text: "如果连表面第一层都固定，吸附能会明显偏大。判断标准：固定层数增加时吸附能应逐渐收敛；做一次「多放开一层」的对照，是最便宜的自检。",
           },
         ],
       },
       {
         id: "9.5",
-        title: "两种 OT，别搞混",
+        title: "CELL_OPT：压力、晶胞与真空方向",
         blocks: [
           {
             type: "p",
-            text: "OT（orbital transformation）在保持轨道正交归一的子空间里直接最小化电子能量，绕开全对角化。对大绝缘体它比对角化快得多。CP2K 里有两个地方能写 OT，含义完全不同，这是本章最容易混的一点。",
-          },
-          {
-            type: "compare",
-            left: {
-              title: "&SCF%OT（直接 OT）",
-              items: [
-                "整个 SCF 就是一次变分最小化",
-                "轨道（及可选的旋转、辅助能量）都是优化变量",
-                "不需要 &MIXING，也不需要对角化",
-                "固定占据或分数占据都能做",
-              ],
-            },
-            right: {
-              title: "&SCF%DIAGONALIZATION%OT",
-              items: [
-                "只是把对角化那一步换成 OT 本征求解器",
-                "KS 矩阵固定，外层仍由 SCF 负责占据与混合",
-                "需要 &MIXING，与普通对角化流程并列",
-                "数学上与直接 OT 不等价",
-              ],
-            },
+            text: "只知道原子位置不够时（体相晶体、应变固体、二维材料的面内晶格），要让晶胞也动。CELL_OPT 同时优化原子与晶胞，用应力（stress）而不是力来驱动晶胞；类比 VASP 的 `vc-relax`。关键是给对**外压**，并想清楚哪些方向该弛豫。",
           },
           {
             type: "code",
             lang: "cp2k",
-            title: "直接 OT：固定占据的标准写法",
-            text: `&SCF
-  EPS_SCF 1.0E-7
-  MAX_SCF 50
-  &OT
-    ALGORITHM STRICT
-    MINIMIZER CG
-    PRECONDITIONER FULL_SINGLE_INVERSE
-  &END OT
-&END SCF`,
+            title: "cell_opt.inp（体相，1 atm）",
+            text: `&GLOBAL
+  PROJECT bcc_fe
+  RUN_TYPE CELL_OPT
+&END GLOBAL
+
+&FORCE_EVAL
+  METHOD Quickstep
+  STRESS_TENSOR ANALYTICAL
+  &DFT
+    BASIS_SET_FILE_NAME BASIS_MOLOPT
+    POTENTIAL_FILE_NAME GTH_POTENTIALS
+    &MGRID
+      CUTOFF 500
+      REL_CUTOFF 60
+    &END MGRID
+    &SCF
+      EPS_SCF 1.0E-6
+      MAX_SCF 100
+      &OT T
+        MINIMIZER CG
+        PRECONDITIONER FULL_SINGLE_INVERSE
+      &END OT
+    &END SCF
+    &XC
+      &XC_FUNCTIONAL PBE
+      &END XC_FUNCTIONAL
+    &END XC
+  &END DFT
+  &SUBSYS
+    &CELL
+      ABC 2.87 2.87 2.87
+      ALPHA_BETA_GAMMA 90.0 90.0 90.0
+    &END CELL
+    &COORD
+      Fe 0.0 0.0 0.0
+      Fe 0.5 0.5 0.5
+    &END COORD
+    &KIND Fe
+      BASIS_SET DZVP-MOLOPT-SR-GTH
+      POTENTIAL GTH-PBE-q16
+    &END KIND
+  &END SUBSYS
+  &MOTION
+    &CELL_OPT
+      TYPE DIRECT_CELL_OPT
+      OPTIMIZER BFGS
+      MAX_ITER 200
+      EXTERNAL_PRESSURE 1.01325E+00
+      PRESSURE_TOLERANCE 100.0
+      KEEP_ANGLES T
+    &END CELL_OPT
+  &END MOTION
+&END FORCE_EVAL`,
           },
           {
             type: "p",
-            text: "ALGORITHM 的 STRICT 与 MINIMIZER 的 CG 都是默认值，PRECONDITIONER 则强烈依赖体系与基组：FULL_SINGLE_INVERSE 对多数分子够用，FULL_ALL 更贵但更稳。手册的建议很实在——预条件的优劣要实测，不要按名字里的等级拍脑袋。",
-          },
-          {
-            type: "code",
-            lang: "cp2k",
-            title: "直接 OT + 分数占据（金属）",
-            text: `&SCF
-  ADDED_MOS AUTO
-  MAX_SCF 30
-  &SMEAR ON
-    METHOD FERMI_DIRAC
-    ELECTRONIC_TEMPERATURE 500
-  &END SMEAR
-  &OT
-    ALGORITHM STRICT
-    MINIMIZER CG
-    PRECONDITIONER FULL_ALL
-    ROTATION
-    ENERGIES
-  &END OT
-  &OUTER_SCF
-    MAX_SCF 10
-    EPS_SCF 1.0E-6
-  &END OUTER_SCF
-&END SCF`,
+            text: "`STRESS_TENSOR ANALYTICAL` 打开解析应力；没有它，晶胞没有正确的驱动力。`EXTERNAL_PRESSURE` 的单位是 bar，1 atm 约 1.01325 bar；`PRESSURE_TOLERANCE 100` 表示压力残差在 100 bar 内可接受（对体相不算苛刻）。`KEEP_ANGLES` 让晶胞角度保持不变；已知空间群时，还可以配合 `&CELL` 的对称性设置用 `KEEP_SYMMETRY`，把优化限制在对称性允许的形变内。",
           },
           {
             type: "p",
-            text: "做分数占据的直接 OT，必须同时打开 **ROTATION** 与 **ENERGIES**：前者让占据列参与旋转变分，后者加入辅助能量变量。两者要一起用，单开一个没有意义。OCCUPATION_PRECONDITIONER 是可选的附加项，不能替代 PRECONDITIONER。",
-          },
-          {
-            type: "p",
-            text: "`&OUTER_SCF` 是 OT 的外层循环，用来更新预条件。内层跑到 MAX_SCF 仍未满足 EPS_SCF 时，程序退出内层、做一次外层再进去。正因为有这层，OT 的内层 MAX_SCF 可以降到 16–32，外层 MAX_SCF 取 8–16 通常够用。",
+            text: "做 slab 或二维材料时，**真空方向不该弛豫**。要么固定该方向（用 `CONSTRAINT` 限定），要么先定晶胞再只做固定晶胞的 GEO_OPT。真空层厚度本身也要做收敛测试：真空从 15 Å 加到 20 Å，吸附能变化小于你的误差目标，才算够。",
           },
           {
             type: "callout",
-            kind: "info",
-            title: "OT 适合谁",
-            text: "大绝缘体、分子、表面都适合。金属与窄带隙体系也能用，但要开展宽与旋转能量变量，参数更多。如果你的体系有大量近简并态，先老老实实用对角化加 smearing，再考虑 OT。",
+            kind: "danger",
+            title: "变胞会改变网格",
+            text: "CUTOFF 固定时，晶胞变大意味着格点间距变化，能量/力/应力可能出现不连续。做 CELL_OPT 时可用 `&CELL/CELL_REF` 指定参考晶胞（取优化范围的上限），让格点数保持稳定，再做一次 CUTOFF 复核。",
           },
         ],
       },
       {
         id: "9.6",
-        title: "收敛失败：按顺序排查",
+        title: "CI-NEB：从初末态找鞍点",
         blocks: [
           {
             type: "p",
-            text: "SCF 不收敛几乎总有原因，而且大多数原因不在 SCF 参数里。下面这个顺序是手册推荐的思路：从物理设置开始，逐步往数值参数走，每一步只改一件事。",
+            text: "过渡态不能靠「把原子推过去再优化」得到——那只会滑回起点或终点。NEB 的思路是：在初末态之间插一串镜像，给相邻镜像加弹簧，同时把垂直于路径的力投影掉，让整条链沿最小能量路径（MEP）走。CI-NEB 再让最高点不受弹簧力并「爬坡」，从而精确落在鞍点。",
           },
           {
-            type: "steps",
-            items: [
-              { t: "查结构与电荷", d: "键长是否离谱、有没有原子重叠；CHARGE 与 MULTIPLICITY 是否符合真实电子态，开壳层要加 UKS" },
-              { t: "查基组与网格", d: "基组是否太小、赝势 q 值是否对；CUTOFF 与 REL_CUTOFF 是否够，EPS_DEFAULT 是否过松" },
-              { t: "换初猜", d: "SCF_GUESS RESTART 从便宜计算的波函数重启；确认 gamma-only 用 -RESTART.wfn、k 点用 -RESTART.kp" },
-              { t: "调混合", d: "先降 ALPHA，再换 BROYDEN_MIXING，加 NBUFFER；金属再加 BETA 压制 sloshing" },
-              { t: "开 smearing", d: "金属与窄带隙体系用 FERMI_DIRAC 加有限温度，配合 ADDED_MOS 给空带" },
-              { t: "换求解器", d: "大绝缘体改直接 OT；或先用对角化收敛，再拿波函数给 OT 当初猜" },
-            ],
-          },
-          {
-            type: "table",
-            head: ["症状", "最可能的原因", "处理"],
-            rows: [
-              ["能量在两步之间大幅振荡", "混合太激进，或金属费米面跳变", "降 ALPHA；开 smearing"],
-              ["Convergence 缓慢下降后卡住", "初猜太差，或基组/网格不足", "RESTART 初猜；回查第 6、7 章"],
-              ["警告最高带仍有占据", "ADDED_MOS 不够，或温度/展宽不当", "加空带；检查电子数与温度"],
-              ["第一步就发散", "结构有重叠原子，或电荷/多重度写错", "先修结构，再谈参数"],
-              ["内存不足被杀", "杂化或大体系的内存需求", "调 &HF/&MEMORY，或换 ADMM"],
-            ],
-            caption: "常见失败与对应处理",
+            type: "p",
+            text: "先各优化初态与末态，再插点。课程用的脚本是 `xyz2neb.pl`：",
           },
           {
             type: "code",
             lang: "bash",
-            title: "从输出里读收敛信息",
-            text: `grep -n "SCF run converged" h2o.out
-grep -n "SCF run NOT converged" h2o.out
-grep -n "Total energy" h2o.out | tail -n 3
-grep -n "highest band" h2o.out`,
+            title: "插点与检查",
+            text: `# is.xyz / fs.xyz 是优化好的初态与末态（同原子数、同顺序）
+./xyz2neb.pl is.xyz fs.xyz 5
+ls 0.xyz 1.xyz 2.xyz 3.xyz 4.xyz 5.xyz
+
+# 确认原子数一致：每个文件第二行之后应有相同行数
+for f in 0.xyz 1.xyz 2.xyz 3.xyz 4.xyz 5.xyz; do
+  echo -n "$f "; sed -n '1p' $f
+done`,
+          },
+          {
+            type: "code",
+            lang: "cp2k",
+            title: "band.inp（CI-NEB 骨架）",
+            text: `&GLOBAL
+  PROJECT neb
+  RUN_TYPE BAND
+&END GLOBAL
+
+&FORCE_EVAL
+  METHOD Quickstep
+  &DFT
+    BASIS_SET_FILE_NAME BASIS_MOLOPT
+    POTENTIAL_FILE_NAME GTH_POTENTIALS
+    &MGRID
+      CUTOFF 400
+      REL_CUTOFF 60
+    &END MGRID
+    &SCF
+      EPS_SCF 1.0E-6
+      MAX_SCF 100
+      SCF_GUESS RESTART
+      &OT T
+        MINIMIZER CG
+        PRECONDITIONER FULL_SINGLE_INVERSE
+      &END OT
+      &OUTER_SCF T
+        EPS_SCF 1.0E-5
+        MAX_SCF 10
+      &END OUTER_SCF
+    &END SCF
+    &XC
+      &XC_FUNCTIONAL PBE
+      &END XC_FUNCTIONAL
+    &END XC
+  &END DFT
+  &SUBSYS
+    &CELL
+      ABC 12.0 12.0 20.0
+      PERIODIC XYZ
+    &END CELL
+    &COORD
+      O 0.0 0.0 8.0
+      H 0.0 0.0 9.0
+    &END COORD
+    &KIND O
+      BASIS_SET DZVP-MOLOPT-GTH
+      POTENTIAL GTH-PBE-q6
+    &END KIND
+    &KIND H
+      BASIS_SET DZVP-MOLOPT-GTH
+      POTENTIAL GTH-PBE-q1
+    &END KIND
+  &END SUBSYS
+  &MOTION
+    &BAND
+      BAND_TYPE CI-NEB
+      NUMBER_OF_REPLICA 6
+      NPROC_REP 8
+      K_SPRING 0.08
+      ALIGN_FRAMES F
+      ROTATE_FRAMES F
+      &CONVERGENCE_CONTROL
+        MAX_DR 0.01
+        RMS_DR 0.02
+        MAX_FORCE 0.001
+        RMS_FORCE 0.001
+      &END CONVERGENCE_CONTROL
+      &CI_NEB
+        NSTEPS_IT 5
+      &END CI_NEB
+      &OPTIMIZE_BAND
+        OPT_TYPE DIIS
+        OPTIMIZE_END_POINTS F
+      &END OPTIMIZE_BAND
+      &REPLICA
+        COORD_FILE_NAME ./0.xyz
+      &END REPLICA
+      &REPLICA
+        COORD_FILE_NAME ./1.xyz
+      &END REPLICA
+      &REPLICA
+        COORD_FILE_NAME ./2.xyz
+      &END REPLICA
+      &REPLICA
+        COORD_FILE_NAME ./3.xyz
+      &END REPLICA
+      &REPLICA
+        COORD_FILE_NAME ./4.xyz
+      &END REPLICA
+      &REPLICA
+        COORD_FILE_NAME ./5.xyz
+      &END REPLICA
+    &END BAND
+  &END MOTION
+&END FORCE_EVAL`,
+          },
+          {
+            type: "table",
+            head: ["关键词", "含义", "怎么设"],
+            rows: [
+              ["`NUMBER_OF_REPLICA`", "含初末态的总结构数", "3–5 个中间点通常够；路径远则 6–8"],
+              ["`NPROC_REP`", "每个镜像分到的核数", "总核数 ÷ 镜像数；可超额排队"],
+              ["`K_SPRING`", "弹簧常数", "先 0.08 求稳，收敛后再放松到 0.02"],
+              ["`NSTEPS_IT`", "爬坡前先跑的 IT 步数", "5 左右，先让链铺开"],
+              ["`OPTIMIZE_END_POINTS`", "是否优化端点", "F 表示不优化，但**仍会计算**端点"],
+            ],
           },
           {
             type: "p",
-            text: "如果输出里既没有收敛也没有失败信息，多半是程序被外部杀掉了。先看日志末尾与作业系统的记录，再去怀疑 SCF 参数。",
+            text: "`&SUBSYS` 里的坐标不会用于镜像计算（每个 `&REPLICA` 自带文件），但输入校验要求它存在，放一个合法结构即可。跑完后用 `grep -1 MAX cp2k-BAND6.out` 看最高点能量，再把各镜像轨迹拼起来画能垒。",
           },
           {
-            type: "demo",
-            id: "scf",
-            title: "SCF 收敛模拟器",
-            desc: "调混合参数、切换求解器，看迭代曲线怎么变收敛、振荡或发散；把本章的排查顺序用一遍。",
+            type: "callout",
+            kind: "key",
+            title: "DIMER 什么时候用",
+            text: "只有一个初猜、没有末态时，用 DIMER：它从一点出发，沿最低曲率方向爬坡找鞍点。代价是对初猜敏感，且需要较好的 Hessian 估计；有明确初末态时，CI-NEB 更稳。",
           },
         ],
       },
       {
         id: "9.7",
-        title: "检查清单",
+        title: "验证：频率告诉你到了哪里",
         blocks: [
           {
             type: "p",
-            text: "这一章可以压成一条检查顺序：先看体系（结构、电荷、多重度、基组），再看初猜与混合，然后才轮到展宽与求解器。下面这份清单按这个顺序排，出问题就从最上面一条开始排除。",
+            text: "优化收敛只说明「力很小」，不说明「这是极小」。要区分极小点与鞍点，做频率分析：极小点没有虚频，一阶鞍点（过渡态）恰好一个虚频。CP2K 用有限位移，每个原子在 ±x/±y/±z 六个方向各算一次，共 6N+1 次 SCF。",
+          },
+          {
+            type: "code",
+            lang: "cp2k",
+            title: "频率分析片段",
+            text: `&GLOBAL
+  PROJECT freq
+  RUN_TYPE VIBRATIONAL_ANALYSIS
+&END GLOBAL
+
+&MOTION
+  &VIBRATIONAL_ANALYSIS
+    DX 0.01
+    NPROC_REP 7
+    FULLY_PERIODIC T
+    INTENSITIES F
+  &END VIBRATIONAL_ANALYSIS
+&END MOTION`,
+          },
+          {
+            type: "p",
+            text: "`DX` 是位移步长，太大有非谐误差、太小被数值噪声淹没，0.01 bohr 是常用值。`FULLY_PERIODIC T` 对周期体系必要；分子/团簇则要关掉，否则平动转动模会被周期性人为改变。频率结果还能给零点能（ZPE = Σhν/2），用于把电子能量修成 0 K 能量。",
+          },
+          {
+            type: "p",
+            text: "对表面吸附体系，3N 个模里有 6 个对应整体平动/转动（被表面势阱部分限制），通常表现为很低的几个模，不要把它们误判为虚频。真正的虚频应显著为负，且振动模式指向你预期的反应坐标。频率的完整用法（强度、热化学）在第 10 章。",
+          },
+        ],
+      },
+      {
+        id: "9.8",
+        title: "四个常见失败与收束",
+        blocks: [
+          {
+            type: "table",
+            head: ["现象", "原因", "怎么修"],
+            rows: [
+              ["固定的不是底层", "原子编号与 &COORD 顺序不一致", "打印坐标顺序核对，改结构后重查 LIST"],
+              ["力不降、能量乱跳", "SCF 噪声、CUTOFF 太低、泛函/色散不一致", "收紧 EPS_SCF、做 CUTOFF 收敛、复核 &XC"],
+              ["晶胞来回震荡", "压力容差太紧、真空方向也在弛豫", "放宽 PRESSURE_TOLERANCE、固定真空方向、减小信任半径"],
+              ["NEB 镜像塌到端点", "K_SPRING 太大或初末态没优化好", "先优化端点，K_SPRING 从 0.08 起，必要时加点"],
+            ],
+          },
+          {
+            type: "p",
+            text: "NEB 还有两个隐蔽坑：一是**镜像数太少**，最高点落在两个镜像之间，能垒被低估；判断方法是看能量曲线是否光滑、最高点两侧是否都有点。二是**端点原子顺序不一致**，`xyz2neb.pl` 会插出化学上无意义的路径，优化一开始就崩。",
           },
           {
             type: "keypoints",
             items: [
-              "EPS_SCF 默认 1e-5、MAX_SCF 默认 50；判据要和你要报告的能量差对齐",
-              "2024.1 起不收敛默认中止，IGNORE_CONVERGENCE_FAILURE 只能当临时手段",
-              "默认混合是 DIRECT_P_MIXING；难收敛先降 ALPHA，再换 Broyden",
-              "金属靠 smearing 加空带解决，温度/展宽最终要外推到 0",
-              "&SCF%OT 是直接变分求解，&SCF%DIAGONALIZATION%OT 只是换本征求解器",
-              "分数占据的直接 OT 必须同时开 ROTATION 与 ENERGIES",
-              "先修结构、电荷与基组，再调 SCF 参数",
+              "优化前先跑单点：结构合理、SCF 收敛、机时可控",
+              "GEO_OPT 看四个判据，不看总能量；震荡先减小信任半径或收紧 SCF",
+              "约束的原子编号按 &COORD 顺序，改结构必须重查",
+              "CELL_OPT 要有解析应力与正确外压；真空方向不要弛豫",
+              "CI-NEB 的产物必须用频率验证：过渡态恰好一个虚频",
             ],
+          },
+          {
+            type: "demo",
+            id: "scf",
+            title: "动手：优化一步要花多少 SCF",
+            desc: "观察一次 GEO_OPT 迭代里 SCF 步数与能量变化，理解「一步优化 ≠ 一次 SCF」。",
           },
           {
             type: "callout",
             kind: "key",
-            title: "一句话记住",
-            text: "SCF 失败时，先怀疑物理设置，再怀疑数值参数；OT 是对角化的替代路线，不是它的加速开关。",
+            title: "下一章",
+            text: "结构定下来，振动频率能告诉你更多：它是不是真极小、零点能多大、红外峰在哪。第 10 章把频率、热化学与振动分析展开。",
           },
         ],
       },
     ],
     quiz: [
       {
-        q: "EPS_SCF 与 MAX_SCF 分别控制什么？",
+        q: "GEO_OPT 收敛的判据是？",
         options: [
-          "内存上限与迭代步数",
-          "收敛阈值与最大迭代步数",
-          "混合比例与历史步数",
-          "初始猜测与最终精度",
+          "总能量连续两步不变",
+          "MAX_DR、RMS_DR、MAX_FORCE、RMS_FORCE 都满足",
+          "SCF 步数小于 50",
+          "最大力小于 1 eV/Å 即可",
         ],
         answer: 1,
-        explain:
-          "EPS_SCF 是判定收敛的阈值（默认 1e-5），MAX_SCF 是允许的最大迭代步数（默认 50）。一个管精度，一个管预算。",
+        explain: "四个判据分别约束最大/均方位移与最大/均方力，BFGS/CG 下必须全部满足。总能量在中间步可以上升，不能作为收敛依据。",
       },
       {
-        q: "从 CP2K 2024.1 起，SCF 达到 MAX_SCF 仍未收敛时默认会怎样？",
+        q: "做 slab 吸附计算时，通常怎么处理基底？",
         options: [
-          "静默继续，用最后一步的结果",
-          "自动提高 MAX_SCF 重试",
-          "直接中止计算，并在提示里建议设置 IGNORE_CONVERGENCE_FAILURE",
-          "自动切换到 OT",
+          "全部固定，省机时",
+          "全部放开，包括最底层",
+          "固定底部若干层，放开表面几层",
+          "只固定吸附物",
         ],
         answer: 2,
-        explain:
-          "新版本默认 ABORT，避免把未收敛的结果带进后续分析。IGNORE_CONVERGENCE_FAILURE 能强行继续，但手册明确警告其结果可能非物理。",
+        explain: "底层近似体相，固定它可避免整体漂移；表面层必须弛豫，否则吸附能偏大。固定层数是否足够，用「多放开一层」的对照来验证。",
       },
       {
-        q: "计算金属体系时，最应该先做的是？",
+        q: "CELL_OPT 相比 GEO_OPT 多需要什么？",
         options: [
-          "把 ALPHA 调到 0.01",
-          "打开 smearing 并给出足够的空带",
-          "把 EPS_SCF 放宽到 1e-3",
-          "改用 LDA 泛函",
+          "&KPOINTS",
+          "解析应力（STRESS_TENSOR ANALYTICAL）与外部压力",
+          "&VDW_POTENTIAL",
+          "UKS",
         ],
         answer: 1,
-        explain:
-          "金属的费米面切过能带，固定整数占据会让迭代振荡。用 Fermi–Dirac 展宽允许分数占据，并用 ADDED_MOS 提供空带，才能稳定收敛。",
+        explain: "晶胞由应力驱动，必须让 CP2K 算应力（通常解析应力），并给出 EXTERNAL_PRESSURE；同时用 KEEP_ANGLES/KEEP_SYMMETRY 等控制自由度。",
       },
       {
-        q: "&SCF%OT 与 &SCF%DIAGONALIZATION%OT 的关键区别是？",
+        q: "CI-NEB 中 `K_SPRING` 太大时会发生什么？",
         options: [
-          "前者更快，后者更准",
-          "前者直接对电子能量做变分最小化，后者只是把本征求解器换成 OT，外层仍要混合",
-          "前者只能算绝缘体，后者只能算金属",
-          "两者完全等价，只是写法不同",
+          "镜像分布更均匀但能垒偏低、收敛慢",
+          "弹簧力主导，路径偏离 MEP，能垒不可信",
+          "SCF 自动切换为 OT",
+          "端点被自动优化",
         ],
         answer: 1,
-        explain:
-          "直接 OT 把整个 SCF 变成一次最小化，不需要 &MIXING；DIAGONALIZATION%OT 只是在固定 KS 矩阵下迭代求本征值，外层仍由 SCF 负责占据与混合，两者数学上不等价。",
+        explain: "弹簧太硬会让镜像被「拉直」，路径不再沿最小能量路径，能垒失真。通常先用 0.08 求稳，收敛后再放松到 0.02 复核。",
       },
       {
-        q: "用直接 OT 做分数占据（金属）时，&OT 里必须同时打开什么？",
+        q: "频率分析发现两个显著虚频，最可能说明？",
         options: [
-          "ALGORITHM 与 MINIMIZER",
-          "ROTATION 与 ENERGIES",
-          "CHOLESKY 与 SAFE_DIIS",
-          "STEPSIZE 与 ENERGY_GAP",
+          "这是过渡态",
+          "结构不是极小点，或约束/周期性设置有问题",
+          "基组太小",
+          "泛函选错",
         ],
         answer: 1,
-        explain:
-          "ROTATION 让占据列参与旋转变分，ENERGIES 引入辅助能量变量，两者必须一起用；OCCUPATION_PRECONDITIONER 是可选附加项，不能替代 PRECONDITIONER。",
+        explain: "一阶鞍点只有一个虚频。两个及以上通常意味着结构仍在不稳定方向、优化未真正收敛，或 slab/团簇的约束与周期性处理不当。",
       },
     ],
     terms: [
-      { t: "SCF", en: "self-consistent field", d: "反复求解「密度 → 势 → 轨道 → 新密度」直到不动点的迭代过程。" },
-      { t: "mixing", en: "density mixing", d: "把输出密度与旧密度按比例组合成新输入，避免迭代振荡。" },
-      { t: "DIIS", en: "direct inversion in the iterative subspace", d: "用历史残差构造近似逆 Jacobian 的加速收敛方法，Broyden 与 Pulay 都属于这一类。" },
-      { t: "charge sloshing", en: "charge sloshing", d: "长波电荷在迭代间来回振荡的现象，金属与 slab 常见，用 Kerker 阻尼（BETA）压制。" },
-      { t: "smearing", en: "level smearing", d: "允许分数占据、在费米能附近按分布函数抹开占据，用于金属与窄带隙体系。" },
-      { t: "Fermi–Dirac", en: "Fermi–Dirac distribution", d: "由电子温度控制的占据分布，给出固定电子数下的有限温自由能。" },
-      { t: "OT", en: "orbital transformation", d: "在正交归一约束下直接最小化电子能量的方法，避免全对角化，适合大绝缘体。" },
-      { t: "ADDED_MOS", en: "added molecular orbitals", d: "在每个自旋通道额外加入的空带数，展宽后必须有足够空带承载分数占据。" },
+      { t: "几何优化", en: "geometry optimization", d: "沿力方向移动原子，直到力与位移判据同时满足，得到势能面驻点。" },
+      { t: "晶胞优化", en: "cell optimization", d: "同时弛豫原子与晶胞，用应力与外压驱动，类比 VASP 的 vc-relax。" },
+      { t: "信任半径", en: "trust radius", d: "限制单步位移的上限，防止优化在坏初始结构上走太远。" },
+      { t: "CI-NEB", en: "climbing image NEB", d: "让最高镜像爬坡到鞍点的 NEB 变体，用于定位过渡态。" },
+      { t: "虚频", en: "imaginary frequency", d: "频率的负值平方根，表示该方向曲率为负；极小点为零，过渡态为一个。" },
+      { t: "零点能", en: "ZPE", d: "量子谐振子基态能量之和，用于把电子能量修成 0 K 能量。" },
     ],
     sources: [
-      { t: "SCF 收敛（手册）", url: "https://manual.cp2k.org/trunk/methods/dft/convergence.html" },
-      { t: "Orbital Transformation（手册）", url: "https://manual.cp2k.org/trunk/methods/dft/orbital_transformation.html" },
-      { t: "&SCF 输入参考", url: "https://manual.cp2k.org/trunk/CP2K_INPUT/FORCE_EVAL/DFT/SCF.html" },
-      { t: "&MIXING 输入参考", url: "https://manual.cp2k.org/trunk/CP2K_INPUT/FORCE_EVAL/DFT/SCF/MIXING.html" },
+      { t: "Geometry and Cell Optimization", url: "https://manual.cp2k.org/trunk/methods/optimization/geometry_and_cell_opt.html" },
+      { t: "Nudged Elastic Band", url: "https://manual.cp2k.org/trunk/methods/optimization/nudged_elastic_band.html" },
+      { t: "&GEO_OPT input reference", url: "https://manual.cp2k.org/trunk/CP2K_INPUT/MOTION/GEO_OPT.html" },
+      { t: "&BAND input reference", url: "https://manual.cp2k.org/trunk/CP2K_INPUT/MOTION/BAND.html" },
     ],
   };
 })();

@@ -114,7 +114,8 @@
       };
       el.querySelectorAll("[data-k]").forEach((inp) => {
         inp.addEventListener("input", () => {
-          cfg[inp.dataset.k] = inp.dataset.k === "cutoff" || inp.dataset.k === "rel" ? +inp.value : inp.value;
+          const key = inp.dataset.k;
+          cfg[key] = key === "cutoff" || key === "rel" ? +inp.value : inp.value;
           paint();
         });
       });

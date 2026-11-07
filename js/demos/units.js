@@ -55,22 +55,24 @@
         '<div class="demo-presets" data-presets></div>' +
         '<div class="demo-note">换算基于 CODATA 常数：1 Hartree = 27.211386 eV = 2 Ry；1 Bohr = 0.529177 Å。CUTOFF / REL_CUTOFF 的默认单位是 Ry，&MD 的 TIMESTEP 默认单位是 fs。</div>';
 
-      const get = (k) => el.querySelector('[data-k="' + k + '"]');
       const out = el.querySelector("[data-out]");
       const presets = el.querySelector("[data-presets]");
+      const catEl = el.querySelector('[data-k="cat"]');
+      const valEl = el.querySelector('[data-k="val"]');
+      const unitEl = el.querySelector('[data-k="unit"]');
 
       const fillUnits = () => {
-        const cat = get("cat").value;
-        const sel = get("unit");
+        const cat = catEl.value;
+        const sel = unitEl;
         sel.innerHTML = SETS[cat].map((x) => '<option value="' + x.u + '">' + x.u + "</option>").join("");
         paint();
       };
 
       const paint = () => {
-        const cat = get("cat").value;
+        const cat = catEl.value;
         const set = SETS[cat];
-        const v = parseFloat(get("val").value);
-        const unit = get("unit").value || set[0].u;
+        const v = parseFloat(valEl.value);
+        const unit = unitEl.value || set[0].u;
         const src = set.find((x) => x.u === unit) || set[0];
         const base = (isFinite(v) ? v : 0) * src.f;
         out.innerHTML = set
@@ -86,16 +88,16 @@
       presets.querySelectorAll("button").forEach((b) => {
         b.addEventListener("click", () => {
           const p = PRESETS[+b.dataset.i];
-          get("cat").value = p.cat;
-          get("val").value = p.v;
+          catEl.value = p.cat;
+          valEl.value = p.v;
           fillUnits();
-          get("unit").value = p.u;
+          unitEl.value = p.u;
           paint();
         });
       });
-      get("cat").addEventListener("change", fillUnits);
-      get("unit").addEventListener("change", paint);
-      get("val").addEventListener("input", paint);
+      catEl.addEventListener("change", fillUnits);
+      unitEl.addEventListener("change", paint);
+      valEl.addEventListener("input", paint);
       fillUnits();
     },
   };

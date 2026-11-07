@@ -68,17 +68,20 @@
         '<div class="grid-table-wrap"><table class="demo-table" data-table></table></div>' +
         '<div class="demo-note" data-msg></div>';
 
-      const get = (k) => el.querySelector('[data-k="' + k + '"]');
       const viz = el.querySelector("[data-viz]");
       const table = el.querySelector("[data-table]");
       const msg = el.querySelector("[data-msg]");
       const aval = el.querySelector("[data-aval]");
+      const cutoffEl = el.querySelector('[data-k="cutoff"]');
+      const relEl = el.querySelector('[data-k="rel"]');
+      const ngridsEl = el.querySelector('[data-k="ngrids"]');
+      const aEl = el.querySelector('[data-k="a"]');
 
       const paint = () => {
-        const cutoff = Math.max(50, +get("cutoff").value || 400);
-        const rel = Math.max(5, +get("rel").value || 50);
-        const ngrids = Math.min(4, Math.max(1, +get("ngrids").value || 4));
-        const a = +get("a").value;
+        const cutoff = Math.max(50, +cutoffEl.value || 400);
+        const rel = Math.max(5, +relEl.value || 50);
+        const ngrids = Math.min(4, Math.max(1, +ngridsEl.value || 4));
+        const a = +aEl.value;
         aval.textContent = a.toFixed(2);
         const rows = levelTable(cutoff, rel, ngrids, 3);
         const hit = mappedLevel(rows, rel, a);

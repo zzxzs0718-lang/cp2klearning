@@ -8,11 +8,11 @@
   /* ---------------- 基础工具 ---------------- */
   const $ = (s, r) => (r || document).querySelector(s);
   const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
-  const esc = (s) =>
-    String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const ESC_MAP = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
+  const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ESC_MAP[c]);
   const clamp = (n, a, b) => Math.max(a, Math.min(b, n));
   const CHAPTERS = Object.values(window.CONTENT || {}).sort((a, b) => a.num - b.num);
-  const PARTS = ["准备", "上手", "DFT 核心", "结构与振动", "动力学", "分析与性质", "进阶与工程"];
+  const PARTS = ["起步", "输入与体系", "电子结构", "结构与振动", "动力学与自由能", "分析与实战"];
   const store = {
     get(k, d) {
       try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; }
@@ -28,6 +28,13 @@
     keywords: null,
     kwLoading: false,
   };
+  const CHAPTER_IDS = new Set(CHAPTERS.map((c) => c.id));
+  const CHAPTER_INDEX = new Map(CHAPTERS.map((c, i) => [c.id, i]));
+  function countDone() {
+    let n = 0;
+    Object.keys(state.visited).forEach((k) => { if (CHAPTER_IDS.has(k)) n++; });
+    return n;
+  }
 
   /* ---------------- 行内格式 ---------------- */
   const GREEK = {
@@ -37,6 +44,7 @@
     hbar: "ℏ", partial: "∂", nabla: "∇", infty: "∞", pm: "±", times: "×", cdot: "·", approx: "≈",
     sim: "∼", leq: "≤", geq: "≥", neq: "≠", rightarrow: "→", to: "→", leftarrow: "←", sum: "∑", int: "∫",
   };
+  const CALLOUT_ICONS = { tip: "💡", warn: "⚠️", danger: "⛔", info: "ℹ️", key: "🔑" };
 
   function texify(src) {
     let s = String(src);
@@ -136,8 +144,7 @@
           "</div>";
       }
       case "callout": {
-        const icons = { tip: "💡", warn: "⚠️", danger: "⛔", info: "ℹ️", key: "🔑" };
-        return '<div class="callout ' + esc(b.kind || "info") + '"><span class="ci">' + (icons[b.kind] || "ℹ️") + "</span>" +
+        return '<div class="callout ' + esc(b.kind || "info") + '"><span class="ci">' + (CALLOUT_ICONS[b.kind] || "ℹ️") + "</span>" +
           (b.title ? '<b class="t">' + fmt(b.title) + "</b>" : "") + "<p>" + fmt(b.text) + "</p></div>";
       }
       case "table": {
@@ -196,7 +203,7 @@
       '<a class="side-link" data-page="glossary" href="#/glossary"><span class="n">D</span><span>术语表</span></a>' +
       '<a class="side-link" data-page="tools" href="#/tools"><span class="n">E</span><span>工具箱</span></a></div>';
     const total = CHAPTERS.length || 21;
-    const done = Object.keys(state.visited).filter((k) => CHAPTERS.some((c) => c.id === k)).length;
+    const done = countDone();
     html += '<div class="side-progress"><div class="sp-top"><span>学习进度</span><span>' + done + " / " + total + '</span></div>' +
       '<div class="bar"><i style="width:' + Math.round((done / total) * 100) + '%"></i></div></div>';
     $("#sidebar").innerHTML = html;
@@ -212,19 +219,20 @@
 
   /* ---------------- 章节视图 ---------------- */
   function chapterHTML(c) {
-    const main = CHAPTERS.findIndex((x) => x.id === c.id);
+    const main = CHAPTER_INDEX.get(c.id);
     const prev = CHAPTERS[main - 1], next = CHAPTERS[main + 1];
+    const sections = c.sections || [];
     let h = '<article class="chapter">';
     h += '<header class="chapter-head"><div class="part">' + esc(c.part) + " · 第 " + c.num + " 章</div>" +
       '<div class="chapter-num-bg">' + String(c.num).padStart(2, "0") + "</div>" +
       "<h1>" + esc(c.title) + "</h1><p class=\"sub\">" + fmt(c.subtitle || "") + "</p>" +
-      '<div class="chapter-meta"><span>⏱ 约 ' + (c.hours || 1) + " 小时</span><span>📚 " + (c.sections || []).length + " 节</span>" +
+      '<div class="chapter-meta"><span>⏱ 约 ' + (c.hours || 1) + " 小时</span><span>📚 " + sections.length + " 节</span>" +
       "<span>🎯 " + esc(c.level || "入门") + "</span></div></header>";
     if (c.goals && c.goals.length) {
       h += '<div class="goals"><h2>学完这一章，你会</h2><ul>' + c.goals.map((g) => "<li>" + fmt(g) + "</li>").join("") + "</ul></div>";
     }
     h += '<div class="chapter-layout"><div class="chapter-body">';
-    (c.sections || []).forEach((s, i) => {
+    sections.forEach((s, i) => {
       h += '<section class="sec" id="' + esc(s.id.replace(/\./g, "-")) + '" data-sec="' + esc(s.id) + '">' +
         '<h2><span class="sn">' + esc(s.id) + "</span>" + fmt(s.title) + "</h2>" + renderBlocks(s.blocks) + "</section>";
     });
@@ -251,7 +259,7 @@
     h += prev ? '<a href="#/' + prev.id + '"><div class="dir">← 上一章</div><div class="ttl">' + esc(prev.title) + "</div></a>" : "<span></span>";
     h += next ? '<a class="next" href="#/' + next.id + '"><div class="dir">下一章 →</div><div class="ttl">' + esc(next.title) + "</div></a>" : "<span></span>";
     h += "</nav></div>";
-    h += '<aside class="toc"><h2>本章目录</h2>' + (c.sections || []).map((s) =>
+    h += '<aside class="toc"><h2>本章目录</h2>' + sections.map((s) =>
       '<a href="#/' + c.id + "/" + s.id.replace(/\./g, "-") + '" data-toc="' + esc(s.id) + '">' + esc(s.id) + " " + esc(s.title) + "</a>").join("") + "</aside>";
     h += "</div></article>";
     return h;
@@ -260,7 +268,6 @@
   function initChapter(c) {
     state.visited[c.id] = Date.now();
     store.set("cp2k.visited", state.visited);
-    markSidebar();
     renderSidebar();
     // TOC 高亮
     const links = $$(".toc a");
@@ -276,7 +283,8 @@
       secs.forEach((s) => io.observe(s));
     }
     // 测验
-    $$(".q").forEach((q) => {
+    const qEls = $$(".q");
+    qEls.forEach((q) => {
       const idx = +q.dataset.q;
       const data = c.quiz[idx];
       q.addEventListener("click", (e) => {
@@ -290,16 +298,14 @@
           else if (j === pick) b.classList.add("wrong");
         });
         const total = c.quiz.length;
-        const answered = $$(".q.answered").length;
-        const right = c.quiz.reduce((n, qq, i) => {
-          const el = $$(".q")[i];
-          if (!el.classList.contains("answered")) return n;
-          const correct = el.querySelector(".opt.right");
-          const wrong = el.querySelector(".opt.wrong");
-          return n + (correct && !wrong ? 1 : 0);
-        }, 0);
-        const score = $(".quiz-score");
-        if (score) score.textContent = "已答 " + answered + "/" + total + " 题 · 答对 " + right + " 题" + (answered === total ? (right === total ? " · 全对，可以进入下一章了。" : " · 回看错题所在小节。") : "");
+        let answered = 0, right = 0;
+        qEls.forEach((el) => {
+          if (!el.classList.contains("answered")) return;
+          answered++;
+          if (el.querySelector(".opt.right") && !el.querySelector(".opt.wrong")) right++;
+        });
+        const quizScore = $(".quiz-score");
+        if (quizScore) quizScore.textContent = "已答 " + answered + "/" + total + " 题 · 答对 " + right + " 题" + (answered === total ? (right === total ? " · 全对，可以进入下一章了。" : " · 回看错题所在小节。") : "");
       });
     });
     // 演示挂载
@@ -360,10 +366,11 @@
   }
 
   function homeHTML() {
-    const done = Object.keys(state.visited).filter((k) => CHAPTERS.some((c) => c.id === k)).length;
+    const done = countDone();
     const secCount = CHAPTERS.reduce((n, c) => n + (c.sections || []).length, 0);
     const pages = (window.STATS && window.STATS.pages) || 3093;
     const kws = (window.STATS && window.STATS.keywords) || "4000+";
+    const heroSource = hlCp2k(heroCode());
     const parts = PARTS.map((p) => {
       const list = CHAPTERS.filter((c) => c.part === p);
       return list.length ? { p, list } : null;
@@ -372,28 +379,30 @@
     let h = '<div class="hero"><div class="hero-inner"><div class="hero-copy">';
     h += '<span class="eyebrow">CP2K 中文实战教程 · 非官方</span>';
     h += "<h1>从第一行输入文件，<br>到<em>跑得动</em>的科研计算</h1>";
-    h += '<p class="lead">基于 CP2K 官方手册（trunk，' + pages + ' 页）系统整理：21 章主线、交互式输入生成器、' + kws + ' 关键词速查。全部离线可用，双击即读。</p>';
+    h += '<p class="lead">以《AIMD 与 CP2K》课程讲义为主线、官方手册（trunk，' + pages + ' 页）为参数依据：' + CHAPTERS.length + ' 章课程、交互式输入生成器、' + kws + ' 关键词速查。全部离线可用，双击即读。</p>';
     h += '<div class="hero-cta"><a class="btn btn-primary" href="#/ch01">从第 1 章开始 →</a>' +
       '<a class="btn btn-ghost" href="#/reference">关键词速查</a></div>';
     h += '<div class="hero-meta"><span><b>' + CHAPTERS.length + "</b>章</span><span><b>" + secCount + "</b>节</span><span><b>5</b>个交互工具</span><span><b>" + pages + "</b>页手册索引</span></div>";
     h += '</div><div class="hero-visual"><div class="term-card"><div class="term-bar"><i></i><i></i><i></i><span>h2o.inp — 第一个 CP2K 计算</span></div>';
-    h += '<div class="term-body">' + hlCp2k(heroCode()) + "</div></div>";
+    h += '<div class="term-body">' + heroSource + "</div></div>";
     h += '<div class="term-note"><b>cp2k.psmp</b><span>−o h2o.out</span><span style="color:var(--ok)">✓ 完成</span></div>';
     h += '</div></div></div>';
 
     h += '<div class="section-wrap"><section class="home-block"><div class="stat-grid">';
-    h += '<div class="stat"><b>' + CHAPTERS.length + '</b><span>主线章节</span><small>从安装到科研配方</small></div>';
+    h += '<div class="stat"><b>' + CHAPTERS.length + '</b><span>主线章节</span><small>从原理到发表级工作流</small></div>';
     h += '<div class="stat"><b>' + secCount + '</b><span>教学小节</span><small>每节配可运行示例</small></div>';
     h += '<div class="stat"><b>' + pages + '</b><span>手册页面索引</span><small>官方手册全量映射</small></div>';
     h += '<div class="stat"><b>' + kws + '</b><span>CP2K 关键词</span><small>含类型、默认值、说明</small></div>';
     h += "</div></section>";
 
-    h += '<section class="home-block"><div class="block-head"><div><h2>学习路线</h2><p>四段式：先跑起来，再理解，最后做研究。</p></div></div><div class="path">';
+    h += '<section class="home-block"><div class="block-head"><div><h2>学习路线</h2><p>六段式：从原理与方法版图，到输入、电子结构、振动、动力学，最后做分析与发布。</p></div></div><div class="path">';
     const stages = [
-      { s: "STAGE 01", t: "跑起来", d: "装好 CP2K，跑通第一个水分子单点能，看懂输入文件和输出。", c: ["ch01", "ch02", "ch03"] },
-      { s: "STAGE 02", t: "理解方法", d: "GPW、基组、泛函、SCF 收敛——决定结果对不对的四个旋钮。", c: ["ch06", "ch07", "ch08", "ch09"] },
-      { s: "STAGE 03", t: "做结构", d: "几何优化、过渡态、振动频率，把静态结构做扎实。", c: ["ch11", "ch12", "ch13"] },
-      { s: "STAGE 04", t: "做动力学", d: "MD、增强采样、电子结构分析，走向真实体系。", c: ["ch14", "ch15", "ch16"] },
+      { s: "STAGE 01", t: "原理与装好", d: "CP2K 能做什么、AIMD 在算什么、怎么装起来跑通。", c: ["ch01", "ch02", "ch03"] },
+      { s: "STAGE 02", t: "输入与体系", d: "输入文件四层结构、基组赝势坐标、建模与网格精度。", c: ["ch04", "ch05", "ch06"] },
+      { s: "STAGE 03", t: "电子结构", d: "泛函、色散、DFT+U、磁性、杂化，以及 OT 与对角化。", c: ["ch07", "ch08"] },
+      { s: "STAGE 04", t: "结构与振动", d: "几何/晶胞优化、过渡态、频率与 TRAVIS 光谱。", c: ["ch09", "ch10"] },
+      { s: "STAGE 05", t: "动力学与自由能", d: "AIMD 实战、恒温器与续算，增强采样与自由能面。", c: ["ch11", "ch12"] },
+      { s: "STAGE 06", t: "分析与发布", d: "轨迹/电子结构分析、表面+水与 QM/MM 案例、发表级工作流。", c: ["ch13", "ch14", "ch15"] },
     ];
     stages.forEach((st) => {
       h += '<div class="path-card"><div class="stage">' + st.s + "</div><h3>" + st.t + "</h3><p>" + st.d + '</p><div class="chips">' +
@@ -415,12 +424,12 @@
     });
     h += "</div></section>";
 
-    h += '<section class="home-block"><div class="quickstart"><div><h3>5 分钟跑通第一个计算</h3><p>假设你已经有可用的 cp2k.psmp。没有？先看第 2 章。</p><ol class="qs-steps">' +
+    h += '<section class="home-block"><div class="quickstart"><div><h3>5 分钟跑通第一个计算</h3><p>假设你已经有可用的 cp2k.psmp。没有？先看第 3 章。</p><ol class="qs-steps">' +
       "<li>新建目录，把右侧输入存为 <code>h2o.inp</code>。</li>" +
       "<li>运行 <code>cp2k.psmp -i h2o.inp -o h2o.out</code>。</li>" +
       "<li>在 <code>h2o.out</code> 里搜 <code>ENERGY|</code>。</li>" +
-      "<li>读第 3 章，弄懂每一行在做什么。</li></ol></div>";
-    h += '<div class="code"><div class="code-head"><span class="lang">cp2k</span><span class="file">h2o.inp</span><span class="spacer"></span><button class="copy-btn" type="button">复制</button></div><pre><code>' + hlCp2k(heroCode()) + "</code></pre></div>";
+      "<li>读第 4 章，弄懂每一行在做什么。</li></ol></div>";
+    h += '<div class="code"><div class="code-head"><span class="lang">cp2k</span><span class="file">h2o.inp</span><span class="spacer"></span><button class="copy-btn" type="button">复制</button></div><pre><code>' + heroSource + "</code></pre></div>";
     h += "</div></section>";
 
     h += '<section class="home-block"><div class="home-cta"><h2>准备好把 CP2K 用起来了吗？</h2><p>已有进度：' + done + "/" + (CHAPTERS.length || 21) + ' 章。建议从「认识 CP2K」开始，按顺序推进。</p><div class="hero-cta" style="justify-content:center"><a class="btn btn-primary" href="#/ch01">从第 1 章开始</a><a class="btn btn-ghost" href="#/map">先看手册地图</a></div></div></section>';
@@ -449,8 +458,15 @@
       loadKeywords(() => { fill(); });
     };
     let shown = 120;
+    let items = [];
     function fill() {
       const all = state.keywords || [];
+      items = all.map((k) => ({
+        k,
+        page: k.page,
+        name: k.name.toLowerCase(),
+        hay: (k.name + " " + k.path + " " + (k.desc || "")).toLowerCase(),
+      }));
       const pages = Array.from(new Set(all.map((k) => k.page))).sort();
       sel.innerHTML = '<option value="">全部章节（' + pages.length + "）</option>" + pages.map((p) => '<option value="' + esc(p) + '">' + esc(p) + "</option>").join("");
       render();
@@ -458,19 +474,18 @@
       sel.addEventListener("change", () => { shown = 120; render(); });
     }
     function render() {
-      const all = state.keywords || [];
       const term = (q.value || "").trim().toLowerCase();
       const page = sel.value;
-      let list = all;
-      if (page) list = list.filter((k) => k.page === page);
+      let list = items;
+      if (page) list = list.filter((x) => x.page === page);
       if (term) {
-        list = list.filter((k) => (k.name + " " + k.path + " " + (k.desc || "")).toLowerCase().includes(term));
-        list.sort((a, b) => (a.name.toLowerCase().startsWith(term) ? 0 : 1) - (b.name.toLowerCase().startsWith(term) ? 0 : 1));
+        list = list.filter((x) => x.hay.includes(term));
+        list.sort((a, b) => (a.name.startsWith(term) ? 0 : 1) - (b.name.startsWith(term) ? 0 : 1));
       }
       cnt.textContent = list.length + " 条";
       if (!list.length) { box.innerHTML = '<div class="empty">没有匹配的关键词。</div>'; return; }
       const slice = list.slice(0, shown);
-      box.innerHTML = slice.map((k) =>
+      box.innerHTML = slice.map(({ k }) =>
         '<div class="ref-row"><div class="rh"><span class="rk">' + esc(k.name) + "</span>" +
         '<span class="rp">' + esc(k.path) + "</span>" + (k.type ? '<span class="rt">' + esc(k.type) + "</span>" : "") + "</div>" +
         (k.desc ? '<div class="rd">' + fmt(k.desc).slice(0, 600) + "</div>" : "") +
@@ -491,15 +506,21 @@
   function initMap() {
     const box = $("#mapbox"), q = $("#mapq"), cnt = $("#mapcount");
     if (!box) return;
+    let items = [];
+    const indexManual = () => {
+      items = (state.manual || []).map((m) => {
+        const parts = m.doc.split("/");
+        return { m, g0: parts[0], g1: parts[1] || "", hay: (m.title + " " + m.doc).toLowerCase() };
+      });
+    };
     const paint = () => {
-      const all = state.manual || [];
       const term = (q.value || "").trim().toLowerCase();
-      const list = term ? all.filter((m) => (m.title + " " + m.doc).toLowerCase().includes(term)) : all;
+      const list = term ? items.filter((x) => x.hay.includes(term)) : items;
       cnt.textContent = list.length + " 页";
       const groups = new Map();
-      list.forEach((m) => {
-        let g = m.doc.split("/")[0];
-        if (g === "CP2K_INPUT") g = "CP2K_INPUT / " + (m.doc.split("/")[1] || "");
+      list.forEach(({ m, g0, g1 }) => {
+        let g = g0;
+        if (g === "CP2K_INPUT") g = "CP2K_INPUT / " + g1;
         if (!groups.has(g)) groups.set(g, []);
         groups.get(g).push(m);
       });
@@ -515,9 +536,9 @@
       }).join("") || '<div class="empty">没有匹配的页面。</div>';
     };
     const ensure = () => {
-      if (state.manual) { paint(); return; }
+      if (state.manual) { indexManual(); paint(); return; }
       box.innerHTML = '<div class="empty">正在载入手册索引…</div>';
-      loadScript("js/data/manual.js", () => { state.manual = window.MANUAL || []; paint(); });
+      loadScript("js/data/manual.js", () => { state.manual = window.MANUAL || []; indexManual(); paint(); });
     };
     ensure();
     if (q) q.addEventListener("input", paint);
@@ -598,13 +619,13 @@
     if (!box) return;
     const map = new Map();
     CHAPTERS.forEach((c) => (c.terms || []).forEach((t) => {
-      if (!map.has(t.t)) map.set(t.t, { t: t.t, en: t.en || "", d: t.d, ch: [] });
+      if (!map.has(t.t)) map.set(t.t, { t: t.t, en: t.en || "", d: t.d, ch: [], hay: (t.t + (t.en || "") + t.d).toLowerCase() });
       map.get(t.t).ch.push(c.num);
     }));
     const all = Array.from(map.values()).sort((a, b) => a.t.localeCompare(b.t, "zh"));
     const paint = () => {
       const term = (q.value || "").trim().toLowerCase();
-      const list = term ? all.filter((x) => (x.t + x.en + x.d).toLowerCase().includes(term)) : all;
+      const list = term ? all.filter((x) => x.hay.includes(term)) : all;
       cnt.textContent = list.length + " 条";
       box.innerHTML = '<div class="term-grid">' + list.map((x) =>
         '<div class="term-item"><b>' + esc(x.t) + '</b><span class="en">' + esc(x.en) + "</span><p>" + fmt(x.d) + '</p><p style="font-size:11px;color:var(--ink-3)">第 ' + x.ch.join("、") + " 章</p></div>").join("") + "</div>";
@@ -654,6 +675,7 @@
     });
     (state.manual || []).forEach((m) => idx.push({ g: "手册", t: m.title, d: m.doc, u: "https://manual.cp2k.org/trunk/" + m.doc + ".html", ext: true }));
     if (state.keywords) (state.keywords).forEach((k) => idx.push({ g: "关键词", t: k.name, d: k.path + " · " + (k.desc || ""), u: "#/reference?q=" + encodeURIComponent(k.name) }));
+    idx.forEach((x) => { x.hay = (x.t + " " + (x.d || "")).toLowerCase(); x.tl = x.t.toLowerCase(); });
     searchIndex = idx;
     return idx;
   }
@@ -666,7 +688,7 @@
     inp.value = "";
     inp.focus();
     renderSearch("");
-    if (!state.keywords) loadKeywords(() => { searchIndex = null; if ($("#search-input") && $("#search-input").value !== undefined) renderSearch($("#search-input").value); });
+    if (!state.keywords) loadKeywords(() => { searchIndex = null; if (inp) renderSearch(inp.value); });
     if (!state.manual) loadScript("js/data/manual.js", () => { state.manual = window.MANUAL || []; searchIndex = null; });
   }
   function closeSearch() { const ov = $("#search-overlay"); if (ov) ov.classList.remove("open"); }
@@ -684,11 +706,8 @@
       searchHits = [];
       return;
     }
-    const hits = idx.filter((x) => (x.t + " " + (x.d || "")).toLowerCase().includes(term));
-    hits.sort((a, b) => {
-      const sa = a.t.toLowerCase().startsWith(term) ? 0 : 1, sb = b.t.toLowerCase().startsWith(term) ? 0 : 1;
-      return sa - sb;
-    });
+    const hits = idx.filter((x) => x.hay.includes(term));
+    hits.sort((a, b) => (a.tl.startsWith(term) ? 0 : 1) - (b.tl.startsWith(term) ? 0 : 1));
     searchHits = hits.slice(0, 40);
     searchSel = 0;
     if (!hits.length) { box.innerHTML = '<div class="sr-empty">没有找到「' + esc(q) + "」</div>"; return; }
@@ -769,7 +788,7 @@
       mountAllDemos();
     } else if (r.path === "about") {
       view.innerHTML = pageHead("关于本站", "非官方 CP2K 中文教程，离线可读。") +
-        "<h3>内容从哪来</h3><p>正文基于 <a href=\"https://manual.cp2k.org/trunk/\" target=\"_blank\" rel=\"noopener\">CP2K 官方手册（trunk 版）</a>：抓取了其中 3093 个页面（123 个方法/安装/教程页 + 2970 个输入参考页），再按教学路线重写成 21 章中文。每章末尾的「来源」列出对应的手册原页；关键词速查与手册地图直接由抓取数据生成。</p>" +
+        "<h3>内容从哪来</h3><p>课程主线来自《庚子计算 · AIMD 与 CP2K》讲义 1–5（PDF 转文本后重新组织），并整合了课程资料包里的 howto、专题讲义与真实练习输入（Au-H2O、Cu(100)+水、Au/TiO₂、QM/MM 元动力学、packmol 建模）。参数、默认值与语法边界以 <a href=\"https://manual.cp2k.org/trunk/\" target=\"_blank\" rel=\"noopener\">CP2K 官方手册（trunk 版）</a>为准：抓取了其中 3093 个页面（123 个方法/安装/教程页 + 2970 个输入参考页）。全站重编为 15 章中文课程，每章末尾的「来源」列出对应的讲义与手册页；关键词速查与手册地图直接由抓取数据生成。</p>" +
         "<h3>哪些是「示意」</h3><p>交互演示里的 SCF 收敛曲线、MD 恒温器、CUTOFF 网格分配都是教学模型：它们遵循手册里的定性规律（多层网格、DIIS/OT 的收敛速度、恒温器对温度的控制），但不是真实求解器，不能用来预测具体数值。正文中凡引用具体数值，都标明来自手册示例或需要自测。</p>" +
         "<h3>使用与许可</h3><p>站点代码（HTML/CSS/JS 与构建脚本）可自由用于学习与教学；手册文本与关键词说明版权归 CP2K 项目，按其许可使用；CP2K 本身是 GPLv2。示例在 Linux + cp2k.psmp 下验证语法，但不同版本、不同基组/赝势文件可能导致结果差异——正式计算前请以官方手册为准。</p>" +
         "<h3>怎么离线用</h3><p>把整个目录拷到任何机器，双击 <code>index.html</code> 即可。不需要联网，也不依赖任何 CDN。搜索用 <code>Ctrl K</code>，打印用顶栏的打印按钮（会去掉侧栏和按钮，只留正文）。</p>" +
@@ -833,11 +852,12 @@
     };
     applyTheme(state.theme);
     document.addEventListener("click", (e) => {
+      const copyBtn = e.target.closest(".copy-btn");
       if (e.target.closest("#theme-btn")) applyTheme(state.theme === "dark" ? "light" : "dark");
       if (e.target.closest("#print-btn")) window.print();
       if (e.target.closest("#menu-btn")) $("#sidebar").classList.toggle("open");
-      if (e.target.closest(".copy-btn")) {
-        const btn = e.target.closest(".copy-btn");
+      if (copyBtn) {
+        const btn = copyBtn;
         const pre = btn.closest(".code").querySelector("pre");
         const text = pre.textContent;
         const done = () => { btn.textContent = "已复制"; btn.classList.add("ok"); setTimeout(() => { btn.textContent = "复制"; btn.classList.remove("ok"); }, 1600); };
@@ -856,9 +876,9 @@
     }
 
     // 键盘
+    const searchOverlay = $("#search-overlay");
     document.addEventListener("keydown", (e) => {
-      const ov = $("#search-overlay");
-      const open = ov && ov.classList.contains("open");
+      const open = searchOverlay && searchOverlay.classList.contains("open");
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") { e.preventDefault(); open ? closeSearch() : openSearch(); return; }
       if (e.key === "/" && !open && !/input|textarea|select/i.test((e.target.tagName || ""))) { e.preventDefault(); openSearch(); return; }
       if (!open) return;

@@ -27,9 +27,9 @@
     return { x, y, vx, vy, box, pe: 0, ke: 0, t: 0, xi: 0, hist: [] };
   }
 
-  function forces(st) {
+  function forces(st, fx, fy) {
     const { x, y, box } = st;
-    const fx = new Array(N).fill(0), fy = new Array(N).fill(0);
+    fx.fill(0); fy.fill(0);
     let pe = 0;
     for (let i = 0; i < N; i++) {
       for (let j = i + 1; j < N; j++) {
@@ -46,7 +46,6 @@
       }
     }
     st.pe = pe;
-    return [fx, fy];
   }
 
   window.DEMOS.md = {
@@ -65,16 +64,18 @@
         '<div class="demo-note" data-msg></div>' +
         '<div class="demo-note">64 个粒子、二维 Lennard–Jones、约化单位（ε=σ=1，k<sub>B</sub>=1）。NVE 下总能量守恒、温度只做小幅涨落；恒温器把温度拉向目标值，代价是引入非物理的摩擦/随机力。</div>';
 
-      const get = (k) => el.querySelector('[data-k="' + k + '"]');
       const sim = el.querySelector("[data-sim]");
       const chart = el.querySelector("[data-chart]");
       const msg = el.querySelector("[data-msg]");
       const tval = el.querySelector("[data-tval]");
+      const ensEl = el.querySelector('[data-k="ens"]');
+      const tempEl = el.querySelector('[data-k="temp"]');
       const sctx = sim.getContext("2d");
       const cctx = chart.getContext("2d");
       const box = 10;
       let st = init(box);
-      let [fx, fy] = forces(st);
+      const fx = new Array(N), fy = new Array(N);
+      forces(st, fx, fy);
       let frames = 0;
       let running = true;
 
@@ -94,7 +95,7 @@
           st.x[i] = ((st.x[i] % st.box) + st.box) % st.box;
           st.y[i] = ((st.y[i] % st.box) + st.box) % st.box;
         }
-        [fx, fy] = forces(st);
+        forces(st, fx, fy);
         for (let i = 0; i < N; i++) {
           st.vx[i] += half * fx[i];
           st.vy[i] += half * fy[i];
@@ -136,7 +137,8 @@
       function drawSim() {
         const dpr = window.devicePixelRatio || 1;
         const w = 300, h = 300;
-        sim.width = w * dpr; sim.height = h * dpr;
+        const cw = Math.floor(w * dpr), ch = Math.floor(h * dpr);
+        if (sim.width !== cw || sim.height !== ch) { sim.width = cw; sim.height = ch; }
         sctx.setTransform(dpr, 0, 0, dpr, 0, 0);
         sctx.clearRect(0, 0, w, h);
         sctx.fillStyle = "rgba(127,127,127,.08)";
@@ -158,8 +160,10 @@
       function drawChart(ens) {
         const dpr = window.devicePixelRatio || 1;
         const w = 330, h = 300;
-        chart.width = w * dpr; chart.height = h * dpr;
+        const cw = Math.floor(w * dpr), ch = Math.floor(h * dpr);
+        if (chart.width !== cw || chart.height !== ch) { chart.width = cw; chart.height = ch; }
         cctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        cctx.lineWidth = 1;
         cctx.clearRect(0, 0, w, h);
         const padL = 34, padB = 22, padT = 12, padR = 8;
         const iw = w - padL - padR, ih = h - padT - padB;
@@ -176,7 +180,7 @@
         }
         cctx.fillStyle = "rgba(127,127,127,.75)";
         cctx.fillText("T* / E*", padL + 4, padT + 12);
-        const target = +get("temp").value;
+        const target = +tempEl.value;
         if (ens !== "nve") {
           const yT = padT + ih - (target / tmax) * ih;
           cctx.strokeStyle = "rgba(244,162,97,.9)";
@@ -214,10 +218,10 @@
         cctx.fillStyle = "rgba(120,120,220,.8)"; cctx.fillRect(padL + 76, h - 12, 10, 3); cctx.fillStyle = "rgba(127,127,127,.8)"; cctx.fillText("总能量（去均值 ×3）", padL + 90, h - 8);
       }
 
-      const tvalUpd = () => { tval.textContent = (+get("temp").value).toFixed(2); };
-      get("temp").addEventListener("input", tvalUpd);
-      get("ens").addEventListener("change", () => { msg.textContent = describe(get("ens").value); });
-      el.querySelector("[data-reset]").addEventListener("click", () => { st = init(box); [fx, fy] = forces(st); st.hist = []; });
+      const tvalUpd = () => { tval.textContent = (+tempEl.value).toFixed(2); };
+      tempEl.addEventListener("input", tvalUpd);
+      ensEl.addEventListener("change", () => { msg.textContent = describe(ensEl.value); });
+      el.querySelector("[data-reset]").addEventListener("click", () => { st = init(box); forces(st, fx, fy); st.hist = []; });
 
       function describe(ens) {
         return {
@@ -234,8 +238,8 @@
       function loop(now) {
         if (!el.isConnected) return;
         if (running) {
-          const ens = get("ens").value;
-          const target = +get("temp").value;
+          const ens = ensEl.value;
+          const target = +tempEl.value;
           for (let s = 0; s < 3; s++) step(ens, target);
           frames++;
           if (frames % 2 === 0) { drawSim(); drawChart(ens); }

@@ -1,496 +1,423 @@
 (function () {
-  "use strict";
-
   window.CONTENT = window.CONTENT || {};
-
   window.CONTENT["ch14"] = {
-    id: "ch14",
-    num: 14,
-    part: "动力学",
-    title: "分子动力学：让原子动起来",
-    subtitle: "&MD、系综、时间步、恒温恒压与能量守恒",
-    hours: 4,
-    level: "进阶",
-    intro:
-      "单点能只回答一个构型有多高，分子动力学回答它接下来会怎么走。这一章从一段能直接跑的 NVE 输入开始，把系综、时间步、恒温器、恒压器逐项拆开，最后给出判断一条轨迹能不能用的检查清单。",
+    id: "ch14", num: 14, part: "分析与实战",
+    title: "表面、水与 QM/MM 案例",
+    subtitle: "四套真实输入：Au(111)/水、Cu(100)/水、Au/TiO2、QM/MM 元动力学",
+    hours: 7.0, level: "高级",
+    intro: "前面各章把 CP2K 的零件拆开讲过，这一章把它们装回去：四套来自「庚子计算 CP2K 课程」的真实练习输入——Au(111) 上的水加 AIMD、Cu(100) 上的水（OT 与对角化两版）、Au/TiO2 界面（DFT+U）、以及一个 2936 原子的 QM/MM 元动力学算例。每套都按「体系怎么来、哪些设置是必须的、算出来的数怎么读」讲，输入片段按原文件引用，数值只给文件里真实存在的。这些是课程练习，不是官方教程；`CUTOFF 350`、`EPS_SCF 1.0E-6` 这类取值是那套体系在那台机器上的选择，不是普适最优。",
     goals: [
-      "写出并跑通 NVE、NVT、NPT 三种系综的 CP2K 输入",
-      "根据物理问题选择系综与恒温器，并说清选择理由",
-      "用 TIMESTEP 和能量守恒数据判断一条轨迹是否可信",
-      "知道 AIMD 每一步都要算电子结构，从而知道该收紧哪些参数"
+      "能独立搭一个金属 slab + 水层的模型：层数、真空、固定层、偶极校正各自怎么定",
+      "读懂 Au(111)/水 的 AIMD 输入，知道 UKS、SMEAR、ADDED_MOS、ASPC 为什么一个都不能少",
+      "在 OT 与对角化之间做选择，并能解释 OUTER_SCF 在难收敛体系里的作用",
+      "会用 DFT+U 处理 TiO2 的 Ti 3d 电子，并把接口处的固定层设对",
+      "理解 QM/MM 的三种力场拼装方式（MIXED/GENMIX、&QMMM、MULTIPLE_FORCE_EVALS）与元动力学的墙"
     ],
     sections: [
       {
-        id: "14.1",
-        title: "从单点到轨迹：&MD 只多做两件事",
+        id: "14.1", title: "四个体系的共同骨架",
         blocks: [
+          { type: "p", text: "四个练习看起来差异很大，骨架其实一样：**一块金属或氧化物 slab，上面放一层分子，边界条件用周期盒子，能量用第一性原理或半经验方法算**。差别在体系大小、电子结构难度（金属的费米面、TiO2 的强关联 d 电子）、以及是否把大部分原子降级成力场。" },
           {
-            type: "p",
-            text: "单点能计算输出的是「这个构型能量多少」。分子动力学输出的是「从这一步到下一步，原子往哪里走、能量怎么在动能与势能之间来回换」。在 CP2K 里，这两件事的输入差别只有两处：==`&GLOBAL` 的 `RUN_TYPE` 改成 `MD`，再补一个 `&MOTION` 段==。泛函、基组、赝势、截断这些力学设置一行都不用改（下面这份输入连泛函都省了，默认就是 PBE），这也是为什么第 3 章的输入可以直接拿来改。"
+            type: "table",
+            caption: "四套练习的规模与关键设置（数值取自各目录的 cp2k.inp 与 coord 文件）",
+            head: ["体系", "原子组成", "盒子（Å）", "电子结构", "动力学"],
+            rows: [
+              ["Au-H2O", "72 Au（6 层 × 12）+ 40 H2O + 6 Na = 198", "8.6507 × 9.9899 × 31.000", "PBE，UKS，SMEAR 300 K，ADDED_MOS 500", "NVT 330 K，0.5 fs，100000 步"],
+              ["cuh2o", "48 Cu + 46 H2O = 186", "10.2425 × 10.2425 × 21.0", "PBE，UKS，SMEAR 300 K（diag 版）", "单点/优化为主"],
+              ["Au-TiO2", "20 Au + 144 Ti + 288 O = 452", "17.7540 × 19.4907 × 27.2817", "PBE + U（Ti 3d，U−J = 13.6 eV）", "NVT 600 K，2 fs，100000 步"],
+              ["meta-qmmm", "56 个 QM 原子 + 2880 个 MM 原子 = 2936", "40.764229 × 39.715716 × 70.0", "PM6 半经验（QM 区）", "NVT 450 K，0.5 fs，元动力学"]
+            ]
           },
+          { type: "p", text: "注意最后一行：这个算例的 QM 区只有 56 个原子，用的是 **PM6 半经验**而不是 DFT，其余 2880 个原子用 EAM（金属）与 Morse/Lennard-Jones（有机部分）描述。这是 QM/MM 的典型取舍——把电子结构的预算全花在反应中心，环境用便宜的方法兜住。" },
+          { type: "callout", kind: "note", title: "算之前先问三个问题", text: "① 这块 slab 需要几层才能让表面性质收敛（通常 3–6 层，看你要算的量对层数的敏感度）？② 真空留多厚（一般 15 Å 起，含偶极的体系要更厚或做校正）？③ 哪些原子固定（固定体相层，让表面与吸附层松弛）？这三个答不上来，后面的 SCF 设置再漂亮也没用。" }
+        ]
+      },
+      {
+        id: "14.2", title: "搭 slab：层数、真空、固定层、偶极校正",
+        blocks: [
+          { type: "p", text: "slab 模型是把体相沿某个晶面切开、在法向留出真空。三件事决定它是否可信：**厚度**（要厚到内部原子已经像体相）、**真空**（要厚到周期像之间不互相看见）、**固定层**（把底部若干层钉住，模拟半无限固体）。" },
           {
-            type: "p",
-            text: "下面这份输入拿一个水分子放在 12 Å 的周期盒里跑 200 步 NVE。盒子开得比分子大很多，是为了让周期性镜像之间不互相作用；分子在盒子里自由平动转动，对教学演示没有影响。"
-          },
-          {
-            type: "code",
-            lang: "cp2k",
-            title: "h2o_nve.inp：最小可运行的 NVE",
-            note: "步数刻意取得很少。这个规模的体系在个人电脑上几十秒就能跑完。泛函没显式写，默认就是 PBE；要换就在 `&DFT` 里补 `&XC%&XC_FUNCTIONAL`。",
-            text: `&GLOBAL
-  PROJECT h2o_md
-  RUN_TYPE MD
-&END GLOBAL
-&FORCE_EVAL
-  METHOD Quickstep
-  &DFT
-    BASIS_SET_FILE_NAME BASIS_MOLOPT
-    POTENTIAL_FILE_NAME GTH_POTENTIALS
-  &END DFT
+            type: "code", lang: "cp2k", title: "金属 slab 的 CELL、坐标与固定层（Au-H2O 练习的原样结构）",
+            text: `&FORCE_EVAL
   &SUBSYS
     &CELL
-      ABC 12 12 12
-      PERIODIC XYZ
+      ABC 8.6507 9.9899 31.000
     &END CELL
     &COORD
-      O 0.000 0.000 0.000
-      H 0.757 0.586 0.000
-      H -0.757 0.586 0.000
+      @INCLUDE coord.inc
     &END COORD
-    &KIND O
+    &CONSTRAINT
+      &FIXED_ATOMS
+        LIST 151..174
+      &END FIXED_ATOMS
+    &END CONSTRAINT
+    &KIND Au
+      ELEMENT Au
       BASIS_SET DZVP-MOLOPT-SR-GTH
-      POTENTIAL GTH-PBE-q6
-    &END KIND
-    &KIND H
-      BASIS_SET DZVP-MOLOPT-SR-GTH
-      POTENTIAL GTH-PBE-q1
+      POTENTIAL GTH-PBE-q11
     &END KIND
   &END SUBSYS
-&END FORCE_EVAL
-&MOTION
-  &MD
-    ENSEMBLE NVE
-    STEPS 200
-    TIMESTEP 0.5
-    TEMPERATURE 300
-  &END MD
-&END MOTION`
+&END FORCE_EVAL`
           },
-          {
-            type: "p",
-            text: "`ENSEMBLE NVE` 表示不跟外界交换能量。`STEPS 200` 乘 `TIMESTEP 0.5` 等于 100 fs，这个长度只够看几轮 O–H 键的伸缩振动，远不够看扩散或构象变化。`TEMPERATURE 300` 在 NVE 里只做一件事：按 300 K 生成初始速度。"
-          },
-          {
-            type: "key",
-            items: [
-              { k: "RUN_TYPE", v: "MD", tag: "打开离子步循环" },
-              { k: "ENSEMBLE", v: "NVE", tag: "固定能量" },
-              { k: "STEPS", v: "步数", tag: "乘时间步得总时长" },
-              { k: "TIMESTEP", v: "fs", tag: "默认 0.5" },
-              { k: "TEMPERATURE", v: "K", tag: "初速度与 NVT/NPT 目标温度" }
-            ]
-          },
-          {
-            type: "callout",
-            kind: "info",
-            title: "先 NVE 再 NVT",
-            text: "几乎所有 MD 工作流都从一段短 NVE 开始。理由很实际：NVE 没有恒温器在悄悄加减能量，体系出了问题（时间步太大、SCF 不收敛、结构太离谱）会直接反映成总能量漂移，而不是被恒温器掩盖。"
-          },
-          { type: "keypoints", items: ["MD 输入 = 单点能输入 + RUN_TYPE MD + &MOTION 段", "STEPS × TIMESTEP 是轨迹的物理长度，不是质量指标", "NVE 里 TEMPERATURE 只用来生成初速度"] }
+          { type: "p", text: "`LIST 151..174` 这 24 个原子是什么，得回去数 `coord.inc`：那个文件按元素分块排列（H、O、Na、Au 依次），Au 从第 127 号开始，按 z 分成 6 层、每层 12 个，所以 151–174 正好是 z = −1.258 与 1.097 的那两层——**第 3、4 层，不是最底下那层**。课程选择固定中间偏下两层，让最底两层也参与弛豫（它们是 slab 的「体内」，其实几乎不动），表面侧则完全自由。" },
+          { type: "callout", kind: "warn", title: "固定层编号不能照抄", text: "同一个 `LIST 151..174` 换到别的 coord 文件就完全是另一批原子。改体系后必须重新数：按元素分块、按 z 排序、确认你要固定的是哪几层。课程里另一个练习（cuh2o 的 opt）固定的是 `LIST 139..170`，Au-TiO2 固定的是 `1..54` 与 `289..324`——三套编号毫无可比性，全靠对着自己的坐标文件核对。" },
+          { type: "h3", text: "真空与偶极校正" },
+          { type: "p", text: "真空厚度的判据是**静电势在真空区出现平台**：对 z 做平面平均后，如果曲线在真空段是平的，说明上下周期像之间没有净相互作用；如果带斜率，说明存在净偶极，需要加厚真空或者做偶极校正。Au-H2O 的盒子在 z 向给了 31 Å，而 Au 的 6 层只占 11.77 Å，剩下的空间基本都给了真空与水层。" },
+          { type: "p", text: "CP2K 没有 VASP 里 `IDIPOL` 那样的开关，它用的是**解析偶极校正**：在 `&DFT` 里打开 `SURFACE_DIPOLE_CORRECTION T`，并用 `SURF_DIP_DIR` 指明法向。这一项在校正的是「slab 上下表面不对称造成的虚假电场」，和加真空是互补的两件事——真空不够时靠校正救不回来，因为周期像已经物理上重叠了。" },
+          { type: "callout", kind: "tip", title: "固定层与约束不是一回事", text: "`&FIXED_ATOMS` 把原子钉死在原位（零自由度）；`&CONSTRAINT` 里的几何约束则是「保持某个键长/键角」，原子还能在约束面上动。做表面反应扫描时常用后者固定某个 O–H 距离；做 slab 时用前者固定体相层。两者混用要先想清楚自由度还剩几个。" }
         ]
       },
       {
-        id: "14.2",
-        title: "系综：你到底固定了什么量",
+        id: "14.3", title: "水层与固液界面：从建模到预平衡",
         blocks: [
-          {
-            type: "p",
-            text: "系综听起来抽象，其实就是一句话：**哪几个热力学量被钉死，哪几个量允许涨落**。真实实验大多在恒温恒压下进行，所以 NVT 和 NPT 才是生产段的常客；NVE 更像一把尺子，用来量你的积分器准不准。"
-          },
-          {
-            type: "table",
-            caption: "常用系综与适用场景",
-            head: ["ENSEMBLE", "固定什么", "什么时候用"],
-            rows: [
-              ["NVE", "粒子数、体积、总能量", "标定时间步、检查能量守恒、看纯动力学"],
-              ["NVT", "粒子数、体积、温度", "平衡、溶液与生物体系生产段、最常用"],
-              ["NPT_I", "粒子数、压力、温度（各向同性）", "液体、气体、近似各向同性的固体"],
-              ["NPT_F", "粒子数、压力、温度（晶胞可变）", "固体、界面、各向异性应力"],
-              ["LANGEVIN", "随机动力学（摩擦 + 噪声）", "稳健平衡、需要耗散或控温分区时"]
-            ]
-          },
-          {
-            type: "p",
-            text: "选择顺序可以按这个思路：需要观察的时间尺度在常温下对温度涨落敏感吗？敏感就用 NVT。体系有明确的晶胞和外部压力吗？有就先 NVT 平衡、再 NPT 生产。只是想验证积分器？NVE。想要强稳健性（模型粗糙、初结构不好、离子液体这类难平衡体系）？`ENSEMBLE LANGEVIN` 加 `&MD%&LANGEVIN%GAMMA`，摩擦系数小则接近 NVE，大则控得更紧。"
-          },
-          {
-            type: "callout",
-            kind: "key",
-            title: "一句话选法",
-            text: "平衡用 NVT（或 LANGEVIN），生产看问题：恒容用 NVT，恒压用 NPT_I，晶胞要自由变形用 NPT_F，NVE 只用来做诊断。"
-          },
-          {
-            type: "demo",
-            id: "md",
-            title: "分子动力学小实验",
-            desc: "动手改 TIMESTEP、TEMPERATURE 和 STEPS，看温度与总能量怎么变。"
-          },
-          {
-            type: "p",
-            text: "在演示里把 TIMESTEP 从 0.5 一路加大，会看到温度曲线先稳定、后持续上翘。那不是「跑得更快」，而是高频振动被积分坏了，能量漏进了低频自由度。第 3 节专门讲怎么标定这个数。"
-          },
-          { type: "keypoints", items: ["系综 = 固定哪些量、允许哪些量涨落", "NVT 是最常用的生产系综，NVE 是诊断工具", "NPT_I 管各向同性，NPT_F 才允许晶胞形状变化"] }
-        ]
-      },
-      {
-        id: "14.3",
-        title: "TIMESTEP：唯一必须先标定的数",
-        blocks: [
-          {
-            type: "p",
-            text: "`TIMESTEP` 默认 0.5 fs，单位是飞秒。它决定你能分辨的最高频率：步长越大，越快追上积分器的稳定边界。经验上让最快的振动周期至少有十几个步长，误差才压得住。"
-          },
-          {
-            type: "formula",
-            tex: "\\Delta t \\;\\lesssim\\; \\frac{1}{10}\\,\\frac{2\\pi}{\\omega_{\\max}}",
-            caption: "最高角频率决定步长上限；实际取更小，因为还要留出错容差"
-          },
-          {
-            type: "p",
-            text: "含氢体系（O–H、N–H 伸缩）最快，AIMD 的常见起点是 0.5 fs 到 1.0 fs。温度更高、有弱键或正在断键、氢原子很多，就往小的方向走。重原子体系可以到 1–2 fs，但**每一次改大都要重新验一遍守恒**，不能凭体系「看起来重」就跳步。"
-          },
+          { type: "p", text: "水层不是随手撒点分子就行。合理的流程是：**先用经典工具把密度和排布做对，再交给第一性原理做短程重排**。课程包里带了一个 `packmol` 目录，就是用来按区域填分子的——给定盒子、给定每个组分的目标密度，packmol 把分子塞进去且保证不重叠。" },
           {
             type: "steps",
             items: [
-              { t: "先用 0.5 fs 跑 200 步 NVE", d: "这一步同时验证输入、SCF 收敛和结构合理性。" },
-              { t: "把 TIMESTEP 乘二再跑同样步数", d: "只改这一个参数，其它全部不动。" },
-              { t: "比较两条轨迹的 e_tot", d: "放大后总能量开始单向漂移、温度持续上翘，就说明已经过头。" },
-              { t: "回到通过检验的最大步长的八成", d: "留余量，因为生产段会遇到平衡阶段没出现的构型。" }
+              { t: "定水层厚度", d: "按实验密度估分子数：1 g/cm³ 对应约 0.0334 分子/Å³。先算出目标区域的体积，再折算成 H2O 个数，不要凭感觉写。" },
+              { t: "packmol 填分子", d: "把 slab 的坐标固定住，只在水层区域填水，输出合并后的 xyz。" },
+              { t: "转 CP2K 坐标", d: "xyz 转成 `&COORD` 或坐标文件，按元素把 KIND 排好；元素顺序决定了后面固定层与 COLVAR 的编号。" },
+              { t: "短程预平衡", d: "先跑 1–2 ps 低温或带强恒温器的 NVT，让水的取向与密度松弛；检查温度曲线与水的 g(r) 是否合理。" },
+              { t: "生产段", d: "回到目标温度跑长轨迹；分析时丢掉预热段。" }
             ]
           },
-          {
-            type: "callout",
-            kind: "warn",
-            title: "温度自己往上爬是最典型的症状",
-            text: "恒温器开着的时候，时间步过大不容易看出来——恒温器一直在把多出来的热量抽走。所以步长标定一定要在 NVE 下做，或者至少对比恒温器注入/移除能量的量级。"
-          },
-          { type: "keypoints", items: ["TIMESTEP 由体系里最快的振动决定，不由体系大小决定", "标定必须在 NVE 下做，否则被恒温器掩盖", "通过检验后仍要留 20% 余量"] }
+          { type: "p", text: "Au-H2O 的输入里有 6 个 Na 原子，KIND 里给的是 `GTH-PBE-q9`。这类「多余」的原子通常是建模时带入的补偿离子或电解液成分，跑之前要确认它在该体系里是否真有物理意义——如果没有，删掉比留着好，因为它会显著改变界面处的静电势与水的取向。" },
+          { type: "p", text: "界面水的分析在前一章讲过：按层切片算密度分布、算 Au–O 与 O–O 的 g(r)、看第一水层的取向角分布。这里补一条实践细节：**真空层的存在会让体相归一化失效**，所以界面处的 g(r) 与配位数必须用局部密度做归一化，否则第一水层的峰高会被系统性地压低。" }
         ]
       },
       {
-        id: "14.4",
-        title: "恒温器：CSVR 是默认答案",
+        id: "14.4", title: "Au(111)/水 的 AIMD：金属 + 水 + 真空，一个都不能少",
         blocks: [
+          { type: "p", text: "这套输入把三个难点叠在了一起：**金属**（费米面处连续态）、**水**（氢键网络、需要足够长的时间尺度）、**真空**（z 向一半是空的）。金属决定了必须开自旋与展宽；水决定了必须处理部分占据带来的 SCF 震荡；真空则意味着 Poisson 求解器要走对分支。" },
           {
-            type: "p",
-            text: "NVT 需要一个恒温器来补上「与热浴交换能量」这件事。`&MD%&THERMOSTAT%TYPE` 的默认值是 `NOSE`，但常规生产更推荐 `CSVR`：它通过随机重标定速度实现正则分布，对远离平衡的初结构更耐受，也不会像长链 Nose-Hoover 那样在小型体系里出现能量在链上「卡住」的振荡。"
-          },
-          {
-            type: "table",
-            caption: "CP2K 里能选的控温方式",
-            head: ["写法", "机理", "适合"],
-            rows: [
-              ["TYPE NOSE", "Nose-Hoover 链（默认）", "已经平衡好的体系，需要严格动力学时"],
-              ["TYPE CSVR", "随机速度重标定（Bussi 型）", "通用首选，平衡与生产都能用"],
-              ["TYPE GLE", "广义 Langevin，需要给摩擦核", "要复现特定溶剂涨落谱时"],
-              ["TYPE AD_LANGEVIN", "自适应 Langevin", "难平衡体系，自动调整摩擦"],
-              ["ENSEMBLE LANGEVIN", "加摩擦与随机力（&MD%&LANGEVIN%GAMMA）", "分区控温、需要耗散时"]
-            ]
-          },
-          {
-            type: "code",
-            lang: "cp2k",
-            title: "NVT + CSVR 的写法",
-            note: "只列 &MOTION 段，力学部分沿用 14.1。",
-            text: `&MOTION
-  &MD
-    ENSEMBLE NVT
-    STEPS 2000
-    TIMESTEP 0.5
-    TEMPERATURE 330
-    &THERMOSTAT
-      TYPE CSVR
-      &CSVR
-        TIMECON 100.0
-      &END CSVR
-    &END THERMOSTAT
-  &END MD
-&END MOTION`
-          },
-          {
-            type: "p",
-            text: "`TIMECON` 单位是 fs，控制恒温器「多急」。典型值 100 fs 附近对多数 AIMD 体系是稳健的（典型值，需自测）：50 fs 左右升温降温快，适合平衡初期；200 fs 以上更温和，适合不希望恒温器干扰动力学谱的生产段。默认值是 1000 fs，对几十到几百 fs 的轨迹来说等于几乎不控温。"
-          },
-          {
-            type: "compare",
-            left: {
-              title: "CSVR",
-              items: ["随机重标定，采样正则分布", "对初结构粗糙、温度偏差大的情况稳健", "只有一个时间常数要调", "生产段首选"]
-            },
-            right: {
-              title: "NOSE（Nose-Hoover 链）",
-              items: ["确定性扩展变量，动力学可逆", "小体系、远离平衡时容易振荡", "链长与时间常数都要顾", "体系已平衡、且在意严格动力学时用"]
-            }
-          },
-          {
-            type: "callout",
-            kind: "danger",
-            title: "CP2K 里没有 BERENDSEN 这个恒温器",
-            text: "老教程里常见的「每 N 步把速度乘一个因子拉回目标温度」属于 Berendsen 型弱耦合，它不产生正确的正则分布。CP2K 的 `TYPE` 里没有这一项；早期 `&MD` 的速度重标定参数也已不推荐当作恒温器使用。要「拉得快一点」的正确做法是把 CSVR 的 TIMECON 调小，而不是自己重标定速度。"
-          },
-          { type: "keypoints", items: ["常规 NVT 用 TYPE CSVR，TIMECON 从 100 fs 起调", "TIMECON 越小控温越强，也越容易干扰真实动力学", "不要手写速度重标定来当恒温器"] }
-        ]
-      },
-      {
-        id: "14.5",
-        title: "恒压：NPT 是「会呼吸的盒子」",
-        blocks: [
-          {
-            type: "p",
-            text: "恒压靠 `&MD%&BAROSTAT`。`PRESSURE` 是外压（单位 bar），`TIMECON` 是晶胞「呼吸」的时间常数，同样以 fs 计。`NPT_I` 只允许晶胞整体缩放，`NPT_F` 允许三个方向独立变形，后者才需要关心 `VIRIAL`。"
-          },
-          {
-            type: "code",
-            lang: "cp2k",
-            title: "NPT_I 的写法",
-            note: "恒压器段和恒温器段可以同时存在。",
-            text: `&MOTION
-  &MD
-    ENSEMBLE NPT_I
-    STEPS 2000
-    TIMESTEP 0.5
-    TEMPERATURE 330
-    &THERMOSTAT
-      TYPE CSVR
-      &CSVR
-        TIMECON 100.0
-      &END CSVR
-    &END THERMOSTAT
-    &BAROSTAT
-      PRESSURE 1.0
-      TIMECON 500.0
-    &END BAROSTAT
-  &END MD
-&END MOTION`
-          },
-          {
-            type: "p",
-            text: "NPT 的常见麻烦不是发散，而是晶胞一直小幅振荡、体积平均值随窗口漂移。原因通常有两个：盒子相对分子太小，压力涨落被放大；或者 barostat 的时间常数和你要观察的现象在同一个时间尺度上。前者的解法是加大超胞，后者是加大 `TIMECON`，让晶胞响应变慢。"
-          },
-          {
-            type: "callout",
-            kind: "warn",
-            title: "小晶胞不要直接上 NPT",
-            text: "几十个原子的小盒子在 NPT 下压力噪声很大，晶胞会跟着噪声抖。稳妥流程是先在 NVT 下把结构和温度平衡好，再用同一结构做一段短 NPT 试探，确认体积落在合理范围后才切生产。"
-          },
-          {
-            type: "steps",
-            items: [
-              { t: "NVT 平衡", d: "固定实验晶胞，先把温度与局部结构跑顺。" },
-              { t: "短 NPT 试探", d: "几百到一两千步，观察体积是否朝一个方向漂移。" },
-              { t: "检查晶胞与密度", d: "体积变化量级要和热膨胀、初始结构误差相称，不能跳变。" },
-              { t: "生产段", d: "用试探确认过的 PRESSURE、TIMECON 继续跑，并记住统计要从平衡之后算起。" }
-            ]
-          },
-          { type: "keypoints", items: ["NPT_I 各向同性缩放，NPT_F 才放开晶胞形状", "PRESSURE 单位 bar，TIMECON 单位 fs", "先 NVT 再 NPT，别拿小盒子直接试"] }
-        ]
-      },
-      {
-        id: "14.6",
-        title: "输出：轨迹、能量文件与 restart",
-        blocks: [
-          {
-            type: "p",
-            text: "不用额外设置，CP2K 也会写两样东西：坐标轨迹 `PROJECT-pos-1.xyz` 和能量文件 `PROJECT-1.ener`。能量文件每步一行，列依次是步数、时间（fs）、动能（hartree）、温度（K）、势能（hartree）、总能量（hartree）、每步墙钟时间（s），画温度曲线和守恒曲线都靠它。"
-          },
-          {
-            type: "table",
-            caption: "常用的打印开关都在 &MOTION%&PRINT 下",
-            head: ["开关键", "产出", "典型频率"],
-            rows: [
-              ["&TRAJECTORY", "`-pos-1.xyz` 轨迹", "每 1–10 步"],
-              ["&VELOCITIES", "`-vel-1.xyz` 速度", "和轨迹同频，用于后处理动力学"],
-              ["&FORCES", "`-frc-1.xyz` 力", "只在调试时开，文件很大"],
-              ["&RESTART", "`-1.restart` 续算文件", "每几百到几千步"],
-              ["&CELL / &STRESS", "晶胞与应力", "NPT 时必须"]
-            ]
-          },
-          {
-            type: "code",
-            lang: "cp2k",
-            title: "只写需要的输出",
-            note: "&EACH 里的 MD 10 表示每 10 个 MD 步输出一次。",
-            text: `&MOTION
-  &MD
-    ENSEMBLE NVT
-    STEPS 2000
-    TIMESTEP 0.5
-    TEMPERATURE 330
-  &END MD
-  &PRINT
-    &TRAJECTORY
-      &EACH
-        MD 10
-      &END EACH
-    &END TRAJECTORY
-    &VELOCITIES
-      &EACH
-        MD 10
-      &END EACH
-    &END VELOCITIES
-    &RESTART
-      &EACH
-        MD 500
-      &END EACH
-    &END RESTART
-  &END PRINT
-&END MOTION`
-          },
-          {
-            type: "p",
-            text: "续算靠 `PROJECT-1.restart`：它是一个完整输入，直接 `cp2k.psmp -i PROJECT-1.restart` 就能接着跑；也可以在自己写的输入里加一个顶层的 `&EXT_RESTART` 段，用 `RESTART_FILE_NAME` 指过去。restart 里已经包含坐标、速度、恒温器/恒压器的内部变量，所以**不要手工从轨迹最后一帧重启**——那样速度丢了，恒温器的历史也丢了，等于换了一条轨迹。"
-          },
-          {
-            type: "callout",
-            kind: "tip",
-            title: "打印频率是成本项",
-            text: "轨迹每步写、力每步写，在小体系上看不出来，在上千原子的体系上会明显拖慢并行效率。经验做法：坐标按分析需要定（10 步足够看振动，1 步才够做速度自相关），力只在排查问题时临时打开。"
-          },
-          { type: "keypoints", items: ["pos-1.xyz 与 1.ener 是默认就有的，不用额外开", "restart 里带速度和恒温器状态，续算要用它", "输出频率按分析需求定，别默认每步全写"] }
-        ]
-      },
-      {
-        id: "14.7",
-        title: "能量守恒检查与 AIMD 的额外注意点",
-        blocks: [
-          {
-            type: "p",
-            text: "NVE 下总能量应当守恒，实际只会小幅振荡，振荡幅度来自积分器误差。可用的判据是：扣除平衡前的一小段后，`e_tot` 的最大值与最小值之差相对于平均动能足够小，并且**没有单向漂移**。漂移比振幅更危险——它说明每一步都在系统性地注入或抽走能量。"
-          },
-          {
-            type: "formula",
-            tex: "\\frac{\\max E_{\\rm tot}-\\min E_{\\rm tot}}{\\langle E_{\\rm kin}\\rangle} \\ll 1,\\qquad \\frac{\\Delta E_{\\rm tot}}{\\Delta t}\\approx 0",
-            caption: "看振幅，更看漂移；具体阈值随体系与步长变化，要自己标定"
-          },
-          {
-            type: "list",
-            ordered: true,
-            items: [
-              "先确认每一步 SCF 都**收敛**，日志里不应出现未收敛的警告。",
-              "再确认结构合理：最短原子间距没有塌缩，也没有原子飞出盒子。",
-              "然后才看 e_tot 的振幅与漂移；此时出现漂移才归因到时间步。",
-              "最后看温度：NVT 下温度应围绕目标值涨落，而不是稳定偏高或偏低。"
-            ]
-          },
-          {
-            type: "p",
-            text: "AIMD 与经典 MD 的区别在于：每一步都要重新解一次电子结构，力是「近似收敛的电子结构」给出的。所以电子结构精度直接变成力噪声，力噪声再变成能量漂移和人为加热。"
-          },
-          {
-            type: "code",
-            lang: "cp2k",
-            title: "AIMD 该收紧的两处",
-            note: "截断与 SCF 阈值是主要控制点；外推用来省掉每步的重复迭代。",
+            type: "code", lang: "cp2k", title: "Au-H2O 的电子结构核心（课程原文件的取值）",
             text: `&FORCE_EVAL
   METHOD Quickstep
   &DFT
+    BASIS_SET_FILE_NAME  BASIS_MOLOPT
+    POTENTIAL_FILE_NAME  GTH_POTENTIALS
+    UKS T
     &MGRID
-      CUTOFF 400
-      REL_CUTOFF 40
+      CUTOFF 350
     &END MGRID
     &QS
-      EPS_DEFAULT 1.0E-12
-      EXTRAPOLATION ASPC
+      WF_INTERPOLATION ASPC
       EXTRAPOLATION_ORDER 3
     &END QS
     &SCF
       SCF_GUESS RESTART
       EPS_SCF 1.0E-6
-      MAX_SCF 30
+      MAX_SCF 500
+      ADDED_MOS 500
+      CHOLESKY INVERSE
+      &SMEAR ON
+        METHOD FERMI_DIRAC
+        ELECTRONIC_TEMPERATURE [K] 300
+      &END SMEAR
+      &DIAGONALIZATION
+        ALGORITHM STANDARD
+        EPS_ADAPT 0.01
+      &END DIAGONALIZATION
+      &MIXING
+        METHOD BROYDEN_MIXING
+        ALPHA 0.1
+        BETA 1.5
+        NBROYDEN 8
+      &END MIXING
+    &END SCF
+    &XC
+      &XC_FUNCTIONAL PBE
+      &END XC_FUNCTIONAL
+    &END XC
+  &END DFT
+&END FORCE_EVAL`
+          },
+          { type: "p", text: "逐项说清楚。`UKS T` 是自旋非限制——Au 的 5d/6s 与水分子的闭壳层混在一起，开 UKS 让两个自旋通道各自优化；代价是计算量翻倍。`&SMEAR` 用电子的费米–狄拉克分布替代阶梯占据，`ELECTRONIC_TEMPERATURE` 给的是**电子温度**（不是离子温度），300 K 意味着约 0.026 eV 的展宽，足以抹平费米面附近的占据跳变。`ADDED_MOS 500` 给额外 500 条空轨道，因为金属的部分占据会用到费米能级以上的态——不给空带，SMEAR 就等于没开。" },
+          { type: "p", text: "`CHOLESKY INVERSE` 指定用 Cholesky 分解来求 overlap 矩阵的逆，在难收敛体系上比默认路径更稳。`ALGORITHM STANDARD` 是标准的对角化算法（对应前面章节讲过的 ELPA 这类加速库是另一层优化）。`MIXING` 用 Broyden，ALPHA 0.1 是较小的步长、NBROYDEN 8 表示保留 8 步历史来构造近似 Jacobian——金属体系的密度对 mixer 很敏感，小步长是常态。" },
+          { type: "h3", text: "为什么 AIMD 里要开 ASPC" },
+          { type: "p", text: "`WF_INTERPOLATION ASPC` + `EXTRAPOLATION_ORDER 3` 是一对：MD 每一步的波函数都用前几步的波函数做高阶外推，作为下一步的初猜。原子在 0.5 fs 内移动很小，外推出的初猜离真解很近，SCF 往往几步就收敛。代价是外推误差会随时间积累，所以外层还要有 `EPS_SCF 1.0E-6` 兜底——外推只管初猜，收敛判据不管折扣。" },
+          { type: "callout", kind: "warn", title: "ASPC 不是万能加速键", text: "外推要求体系在时间上连续，且步长不要大到结构剧变。做退火、加约束突然放开、或者从优化结构刚切进 MD 的头几步，外推可能给出很差的初猜，表现为前几步 SCF 步数暴涨。做法是头几步用 `SCF_GUESS ATOMIC` 或降低 `EXTRAPOLATION_ORDER`，等轨迹稳定后再切回 ASPC。" },
+          { type: "demo", id: "md" },
+          { type: "p", text: "`EPS_SCF 1.0E-6` 这个值也不是随便写的。课程讲义里有一张 BOMD 稳定性表（64 个水分子、PBE、0.5 fs），以 `EPS_SCF 1e-10` 的轨迹为参照：`1e-8` 时总能平均绝对误差约 1.2e-11 Ha、力误差 5.1e-9 Ha/Bohr、能量漂移 0.0 K/ns；放到 `1e-6`，总能误差升到 6.9e-8 Ha、力误差 4.8e-7、漂移 0.4 K/ns；到 `1e-4` 就开始不可接受——总能误差 3.3e-4 Ha、力误差 5.9e-5、漂移 50 K/ns。这张表说明的是**趋势**：判据越松，力误差与能量漂移越大，而漂移比总能误差更致命，因为它会在长轨迹里累积成假温度。" }
+        ]
+      },
+      {
+        id: "14.5", title: "OT 还是对角化：Cu(100)/水 的两套输入",
+        blocks: [
+          { type: "p", text: "同一个 Cu(100)+水 体系，课程给了两套输入，只差电子结构求解器。这是一次现成的对照实验：几何、基组、泛函、截断全同，只有 SCF 路线不同，所以能量与步数的差别可以直接归因到求解器。" },
+          {
+            type: "code", lang: "cp2k", title: "OT 路线（cuh2o/ot）：CG 最小化 + 外层 SCF 循环",
+            text: `&FORCE_EVAL
+  &DFT
+    &QS
+      NGRIDS 4
+      CUTOFF 350
+      REL_CUTOFF 60
+    &END QS
+    UKS T
+    &SCF
+      MAX_SCF 100
+      EPS_SCF 1.0E-6
+      SCF_GUESS RESTART
+      &OT
+        MINIMIZER CG
+        PRECONDITIONER FULL_ALL
+        LINESEARCH 2PNT
+      &END OT
+      &OUTER_SCF
+        EPS_SCF 1.0E-5
+        MAX_SCF 100
+      &END OUTER_SCF
     &END SCF
   &END DFT
 &END FORCE_EVAL`
           },
+          { type: "p", text: "OT（orbital transformation）把「解本征值问题」换成「直接最小化总能量对轨道旋转的泛函」，不需要显式对角化，内存与 I/O 都省，适合大体系。它的前提是**体系有带隙**：HOMO–LUMO 间隙太小时，最小化会在近简并的态之间来回摆，收敛变慢甚至失败。`MINIMIZER CG` 是共轭梯度，`PRECONDITIONER FULL_ALL` 是最贵的预条件（也最有效），`LINESEARCH 2PNT` 用两点线搜索——讲义里对应的经验是：2PNT 大多数情况够用，大体系有时要 3PNT，极难收敛的体系才上 GOLD。" },
+          { type: "p", text: "`&OUTER_SCF` 把 SCF 拆成两层：内层用 OT 最小化到 `EPS_SCF 1.0E-6`，外层检查轨道旋转的梯度是否真的降到 `1.0E-5`，不达标就再跑一轮内层。内层 `MAX_SCF 100` 乘以外层最多几轮，才是总的 SCF 预算。这个练习的实际输出是内层 83 步收敛、外层 2 轮，合计 183 步。" },
           {
-            type: "p",
-            text: "`EXTRAPOLATION` 用前几步的波函数外推下一步的初猜，`ASPC` 配 `EXTRAPOLATION_ORDER 3` 是好用的起点，能明显减少每步迭代次数。但外推只是初猜：如果外推质量差，SCF 迭代会变多甚至不收敛，这时要检查结构是否在剧烈变化，而不是一味放宽阈值。"
+            type: "code", lang: "cp2k", title: "对角化路线（cuh2o/diag）：显式本征值 + 展宽",
+            text: `&FORCE_EVAL
+  &DFT
+    &QS
+      EPS_DEFAULT 1.0E-14
+      WF_INTERPOLATION ASPC
+      EXTRAPOLATION_ORDER 3
+    &END QS
+    UKS T
+    &SCF
+      SCF_GUESS RESTART
+      EPS_SCF 1.0E-6
+      MAX_SCF 500
+      ADDED_MOS 500
+      CHOLESKY INVERSE
+      &SMEAR ON
+        METHOD FERMI_DIRAC
+        ELECTRONIC_TEMPERATURE [K] 300
+      &END SMEAR
+      &DIAGONALIZATION
+        ALGORITHM STANDARD
+        EPS_ADAPT 0.01
+      &END DIAGONALIZATION
+      &MIXING
+        METHOD BROYDEN_MIXING
+        ALPHA 0.1
+        BETA 1.5
+        NBROYDEN 8
+      &END MIXING
+    &END SCF
+  &END DFT
+&END FORCE_EVAL`
+          },
+          { type: "p", text: "对角化路线显式构造并求解本征值问题，天然支持部分占据（配合 SMEAR），也能给出空轨道用于 DOS/PDOS 与光学性质。代价是内存与时间随轨道数平方增长，`ADDED_MOS 500` 意味着要多算 500 条空带——这个体系的输出里 `Number of molecular orbitals: 948`（448 条占据 + 500 条空带，对应 896 个电子），比 OT 路线的 448 条多了一倍多。" },
+          {
+            type: "table",
+            caption: "同体系的两次实际运行（数据取自课程输出文件）",
+            head: ["项目", "OT 路线", "对角化路线"],
+            rows: [
+              ["SCF 步数", "内层 83 步，外层 2 轮（合计 183）", "4 步"],
+              ["总能（Ha）", "−3101.834603", "−3101.838526"],
+              ["电子熵项（Ha）", "未单独打印", "−0.0040250399"],
+              ["费米能级", "不输出", "0.0471347 Ha（1.2826 eV）"],
+              ["轨道数", "448（全占据）", "948（448 + 500 空带）"]
+            ]
+          },
+          { type: "p", text: "两个总能差了 0.0039 Ha（约 0.11 eV），看着像方法误差，其实要先做一步归一：对角化路线的 `Total energy` 里已经包含了展宽带来的电子熵项 −TS_el。把 −0.004025 Ha 加回对角化结果得到 −3101.834501 Ha，与 OT 的 −3101.834603 Ha 只差约 1e-4 Ha（3 meV，折合 0.015 meV/atom）。**比较这两种路线的能量之前，先把熵项对齐**，否则会把热力学项误读成数值误差。" },
+          { type: "callout", kind: "tip", title: "选择建议", text: "绝缘体/半导体、大体系、内存紧张 → OT。金属、小带隙、需要空带或 DOS/PDOS、需要分数占据 → 对角化 + SMEAR。拿不准时的稳妥流程是：先用对角化跑一个单点确认能量与占据合理，再切 OT 做长轨迹；如果 OT 在金属上收敛困难，回到对角化而不是继续调 OT 参数。" }
+        ]
+      },
+      {
+        id: "14.6", title: "Au/TiO2：DFT+U 与界面固定",
+        blocks: [
+          { type: "p", text: "TiO2 的 Ti 3d 电子是强关联的，纯 GGA 会把带隙算小、把 Ti 的 d 电子过度离域。标准补救是 DFT+U（Hubbard 修正）：对指定角动量加一个惩罚项，把过于离域的 d 电子推回定域。CP2K 的写法是在 `&DFT` 里给 `PLUS_U_METHOD` 选投影方式，再在 `&KIND` 里给对应元素加 `&DFT_PLUS_U` 段。" },
+          {
+            type: "key", title: "Au-TiO2 练习里的 +U 设置",
+            items: [
+              { k: "PLUS_U_METHOD", v: "MULLIKEN（按 Mulliken 布居做投影）" },
+              { k: "作用对象", v: "Ti 的 L = 2（d 轨道）" },
+              { k: "U_MINUS_J", v: "13.6 eV（课程取值）" },
+              { k: "EPS_U_RAMPING", v: "1.0E-3（U 值逐步加上的收敛辅助）" }
+            ]
+          },
+          { type: "p", text: "为什么是 U−J 而不是 U：CP2K 的参数是「有效 U」，即库仑 U 减去交换 J。文献里同一材料报的 U 从 3 到 8 eV 都有，因为定义与投影方式不同——**换一篇文献的 U 值之前，先确认它的 U−J 定义与投影方法**，否则带隙会算得离谱。`EPS_U_RAMPING` 控制 U 从 0 到目标值的爬升速度，是防止 SCF 因为突然加 U 而发散的小技巧。" },
+          { type: "p", text: "这套输入的电子结构还有两个特点：一是 OT 用的是 `PRECONDITIONER FULL_SINGLE_INVERSE` 配 `MINIMIZER DIIS`，`OUTER_SCF MAX_SCF 4 / EPS_SCF 1.0E-5`——外层只给 4 轮，说明作者预期这个体系收敛不算太难；二是 `&SCF EPS_SCF 3.0E-6 / MAX_SCF 150`，比 Au-H2O 的 1e-6 松一档，452 个原子的 AIMD 要在精度和机时之间折中。" },
+          { type: "p", text: "固定层是 `1..54` 与 `289..324` 两段，共 90 个原子。界面体系的固定层要按**远离界面的一侧**选：Au 团簇和 TiO2 的上表面必须能松弛，底层金属/氧化物则钉住。固定的原子太多，界面应力无处释放；太少，slab 会在 z 向整体漂移。" },
+          { type: "p", text: "分析这套轨迹的脚本也在练习目录里：`rdf/` 下是 Au–Au、Au–O、Au–Ti、Ti–O 的 g(r) 成品曲线（两列，从 0.01 Å 起、步长 0.02 Å），`rmsd/` 下是按时间窗分组的位移曲线，`massC/masscenter-TiO2.py` 则按帧算 Au 原子到金团簇质心的距离——用来判断团簇在 600 K、2 fs 步长下有没有整体迁移。这些是后处理脚本的产物，不是 CP2K 内置打印。" },
+          { type: "callout", kind: "warn", title: "界面体系的温度与步长要一起看", text: "Au-TiO2 用的是 2 fs 步长、600 K。重原子（Au、Ti）的振动周期长，2 fs 可以；但如果体系里有自由的 H（比如羟基或水），2 fs 就偏大，必须靠约束（如 SHAKE 类）或者降回 0.5 fs。判断方法很简单：跑 1 ps 看能量守恒与温度稳定性，漂移明显就降步长。" }
+        ]
+      },
+      {
+        id: "14.7", title: "QM/MM：三种拼装方式与 2936 原子的算例",
+        blocks: [
+          { type: "p", text: "QM/MM 要把同一批原子分给两套能量表达式，再按某种规则混合。CP2K 给了不止一条路，选哪条取决于你要什么：" },
+          {
+            type: "list",
+            ordered: false,
+            items: [
+              "**原生 &QMMM**：一个 `&FORCE_EVAL` 里同时放 QM 与 MM，用 `&QMMM` 段指定 QM 区、链接原子、周期与多极；适合 QM 区与 MM 区在同一套周期边界内、需要静电嵌入的场景。",
+              "**MULTIPLE_FORCE_EVALS + MIXED**：把多个完整的 `&FORCE_EVAL` 各算一遍，再按混合函数加起来；适合 QM 区与 MM 区需要不同盒子/不同边界条件（比如 QM 区孤立、MM 区周期）的场景。",
+              "**MIXED + GENMIX 的通用混合**：不限于 QM/MM，任何两套能量都能按权重混合，甚至可以三项相加做 ONIOM 式分层。"
+            ]
+          },
+          { type: "p", text: "meta-qmmm 这个算例走的是第二条路，而且是三段式：顶层 `&MULTIPLE_FORCE_EVALS` 声明计算顺序 `2 3`（先算第 2 个、再算第 3 个力场），`MULTIPLE_SUBSYS T` 表示每个 `&FORCE_EVAL` 自带子系统；第 1 个力场是混合器（MIXED），第 2 个是 MM（FIST，含 EAM），第 3 个是 QM（Quickstep，PM6）。" },
+          {
+            type: "code", lang: "cp2k", title: "三段式 QM/MM 的混合器（课程原文件结构）",
+            text: `&MULTIPLE_FORCE_EVALS
+  FORCE_EVAL_ORDER 2 3
+  MULTIPLE_SUBSYS T
+&END MULTIPLE_FORCE_EVALS
+
+&FORCE_EVAL
+  METHOD MIXED
+  &MIXED
+    MIXING_TYPE GENMIX
+    GROUP_PARTITION 2 6
+    &GENERIC
+      ERROR_LIMIT 1.0E-10
+      MIXING_FUNCTION E1+E2
+      VARIABLES E1 E2
+    &END GENERIC
+    &MAPPING
+      &FORCE_EVAL_MIXED
+        &FRAGMENT 1
+          1 56
+        &END FRAGMENT
+        &FRAGMENT 2
+          57 2936
+        &END FRAGMENT
+      &END FORCE_EVAL_MIXED
+      &FORCE_EVAL 1
+        DEFINE_FRAGMENTS 1 2
+      &END FORCE_EVAL
+      &FORCE_EVAL 2
+        DEFINE_FRAGMENTS 1
+      &END FORCE_EVAL
+    &END MAPPING
+  &END MIXED
+&END FORCE_EVAL`
+          },
+          { type: "p", text: "`&MAPPING` 是这套写法的心脏：`&FORCE_EVAL_MIXED` 把 1–56 号原子划成片段 1、57–2936 号划成片段 2；然后 `&FORCE_EVAL 1`（MM）被要求同时提供两个片段（`DEFINE_FRAGMENTS 1 2`），`&FORCE_EVAL 2`（QM）只提供片段 1。混合函数 `E1+E2` 里，E1 就是 QM 算的片段 1，E2 是 MM 算的片段 2——两段拼接，切口处没有重复计数，因为这个模型里 QM 与 MM 的原子集合本来就不相交。" },
+          { type: "p", text: "MM 侧用的是 FIST：`&CHARGE` 把所有原子电荷设为 0，靠 `&GENPOT` 的 Morse 型对势（Cu–C、Cu–H 各一套参数）加 `&EAM` 的金属多体势（`PARM_FILE_NAME ./CU.pot`）描述相互作用。注意 `&KIND CU_FIX ELEMENT CU MASS 1000000000.`——质量设成 1e9，这些 Cu 原子就成了几乎不动的「冻结壁」，比用约束固定更省事，因为动力学积分器自然把它们冻住。" },
+          { type: "p", text: "QM 侧：`&QS METHOD PM6` 走半经验，`&SE` 里给了 Coulomb 与 Exchange 的截断 20 Å；`&QMMM` 体系常见的周期问题是「QM 区不该是周期的」，所以这里 QM 的盒子是 `ABC 30 30 30 PERIODIC NONE`，配 `POISSON PERIODIC NONE / POISSON_SOLVER WAVELET`，并把 QM 区坐标用 `&CENTER_COORDINATES` 挪到盒子中心——孤立分子放进足够大的真空盒，是避免周期像相互作用的常规手段。" },
+          { type: "callout", kind: "warn", title: "QM/MM 的三个经典坑", text: "① **切口**：QM 区边界上的化学键必须用链接原子或伪势处理，否则悬空键会带来自旋污染与虚假的电荷转移；这个模型用「QM 区正好是完整分子/团簇」避开了切口。② **静电嵌入**：MM 电荷为 0 时没有嵌入静电，等于机械嵌入，反应能垒会被系统性低估。③ **EMAX_SPLINE**：MM 邻居表用样条插值，原子靠得太近时会直接 abort，报 `GEOMETRY wrong or EMAX_SPLINE too small!`——建模后先检查最短原子间距，别一上来就加 `&SPLINE` 的精度。" },
+          { type: "p", text: "另外两条 QM/MM 的原生路线（`&QMMM` 段、以及内置力场 + GROMACS 外部力场）在手册的方法页里有完整说明，涉及链接原子、多极展开、镜像电荷与可极化力场等选项。用原生 `&QMMM` 时，QM 与 MM 的边界、周期性与泊松求解器都要在同一个 `&FORCE_EVAL` 里协调好，比三段式简单但灵活性低。" }
+        ]
+      },
+      {
+        id: "14.8", title: "元动力学、性能与排错",
+        blocks: [
+          { type: "p", text: "这个 QM/MM 算例的动力学部分是 NVT 450 K、0.5 fs、20 万步，恒温器是 CSVR（`REGION MASSIVE`，`TIMECON 200 fs`）。真正的主角是 `&FREE_ENERGY/&METADYN`：沿两个集合变量（COLVAR）加高斯沉积，把体系从初始构型推出去，最后从 HILLS 文件重建自由能面。" },
+          {
+            type: "code", lang: "cp2k", title: "元动力学：恒温器、沉积参数与集合变量",
+            text: `&MOTION
+  &MD
+    ENSEMBLE NVT
+    STEPS    200000
+    TIMESTEP 0.5
+    TEMPERATURE 450.0
+    &THERMOSTAT
+      TYPE CSVR
+      REGION MASSIVE
+      &CSVR
+        TIMECON [fs] 200.0
+      &END CSVR
+    &END THERMOSTAT
+  &END MD
+  &FREE_ENERGY
+    &METADYN
+      DO_HILLS
+      NT_HILLS 50
+      WW 3.0e-3
+      &METAVAR
+        SCALE 0.3
+        COLVAR 1
+      &END METAVAR
+    &END METADYN
+  &END FREE_ENERGY
+&END MOTION`
+          },
+          { type: "p", text: "墙写在 `&METAVAR` 里，每一侧一道：`&WALL TYPE QUADRATIC`、`POSITION [angstrom] 5.0`、方向 `DIRECTION WALL_PLUS`、`K [kcalmol] 40.0`，另一侧把位置换成 1.0、方向换成 `WALL_MINUS`。这个模型里 CV1 被夹在 1.0–5.0 Å、CV2 在 0.6–4.00 Å；第三个集合变量的整段在最开始的文件里是被注释掉的——说明作者先在二维面上跑，之后再决定要不要升三维。" },
+          { type: "p", text: "集合变量本身定义在 `&FORCE_EVAL/&SUBSYS/&COLVAR` 里，这个模型用了 `&COMBINE_COLVAR`：两条 `&DISTANCE`（原子 4–50、原子 7–49）线性组合成 CV1，`FUNCTION CV1+CV2`、`ERROR_LIMIT 1.0E-8`；另有一条独立的 `&COLVAR/&DISTANCE ATOMS 49 50` 作为 CV2。原子编号在这里是**全局编号**，跨 QM/MM 区直接引用，写错一位整条自由能面就是别的量。" },
+          { type: "h3", text: "性能与 I/O" },
+          { type: "p", text: "2936 个原子、20 万步，产出量是必须提前规划的。这个算例的 `cp2k-pos-1.xyz` 有 262 MB，`cp2k-COLVAR.metadynLog` 有 8.3 MB，`cp2k-HILLS.metadynLog` 107 KB。对应的输出频率设置是 `TRAJECTORY each MD 50`（每 50 步一帧）、`RESTART each MD 100`（每 100 步一个重启）、`RESTART_HISTORY OFF`（不留历史重启，只保留最新一个）。" },
+          { type: "p", text: "三条经验：**轨迹频率按分析需求定**，不是越密越好——每步都存轨迹会让 I/O 成为瓶颈，且文件大到无法处理；**重启文件要留**，长跑必然遇到机时上限或掉线；**SCF 的中间输出要关**，`&PRINT/&RESTART` 与 `&RESTART_HISTORY` 在这种规模下都设成了 OFF。" },
+          {
+            type: "table",
+            caption: "练习里遇到过的三类报错与处理",
+            head: ["现象", "含义", "处理"],
+            rows: [
+              ["`GEOMETRY wrong or EMAX_SPLINE too small!`", "MM 邻居表里有两个原子近到样条无法插值", "检查建模后的最短距离；冲突原子重叠就重排，或临时放宽 `EMAX_SPLINE`"],
+              ["`User requested to restart the wavefunction from the file named: ./cp2k-RESTART.wfn. This file does not exist. ... Calculation continues using ATOMIC GUESS.`", "SCF_GUESS RESTART 但工作目录里没有 wfn", "首次运行属正常；续算时确认 wfn 文件名与 `WFN_RESTART_FILE_NAME` 一致"],
+              ["OT 在金属体系上步数暴涨甚至不收敛", "带隙太小，OT 的最小化前提不成立", "换对角化 + SMEAR；或先把 `MINIMIZER` 换 DIIS 试一次"],
+              ["能量漂移、温度爬升", "SCF 判据过松或步长过大", "把 `EPS_SCF` 收紧一档，或把步长减半重跑短轨迹验证"]
+            ]
           },
           {
-            type: "callout",
-            kind: "danger",
-            title: "截断放太松 = 给体系装了一个加热器",
-            text: "把 CUTOFF 或 EPS_SCF 放宽，单步能快一点，但力变得不平滑。轨迹上表现为总能量单向漂移、温度缓慢上升，而且看起来「一切正常」。这类问题在短轨迹上极难发现，往往要跑几千步才暴露。"
-          },
-          { type: "keypoints", items: ["守首要看漂移，不只看振幅", "SCF 收敛不了时先怀疑结构，再怀疑阈值", "AIMD 的截断与 EPS_SCF 决定力的平滑程度"] }
+            type: "keypoints",
+            items: [
+              "slab 三要素：层数够厚、真空够平、固定层按物理意图选（编号务必对着 coord 文件数）",
+              "金属 + 水 + 真空的 AIMD，UKS / SMEAR / ADDED_MOS / ASPC 是配套的一组设置",
+              "OT 适合有带隙的大体系，金属与小带隙走对角化 + SMEAR + 空带",
+              "OT 与对角化的能量比较前，先把电子熵项对齐",
+              "DFT+U 的 U 是有效 U（U−J），换文献参数前先确认投影方式",
+              "QM/MM 三种拼装：原生 &QMMM、MULTIPLE_FORCE_EVALS + MIXED、GENMIX 通用混合",
+              "元动力学先跑低维面、加墙限定区域，再决定是否升维",
+              "长轨迹先规划输出频率：轨迹、重启、日志三者的体积要提前估"
+            ]
+          }
         ]
       }
     ],
     quiz: [
       {
-        q: "想标定时间步是否合适，最合适的做法是？",
-        options: [
-          "在 NVT 下跑长轨迹，看温度是否稳定",
-          "在 NVE 下跑短轨迹，看总能量是否漂移",
-          "把 TIMESTEP 直接设成 2 fs，能跑完就说明没问题",
-          "看轨迹文件里原子是否飞出去"
-        ],
-        answer: 1,
-        explain: "NVE 没有恒温器掩盖问题，能量漂移会直接暴露积分器误差；能跑完不等于结果可信。"
-      },
-      {
-        q: "`&MD%&THERMOSTAT%&CSVR%TIMECON` 的单位与含义是？",
-        options: [
-          "fs，恒温器响应的时间常数，越小控温越强",
-          "K，目标温度",
-          "bar，外部压力",
-          "hartree，恒温器的能量偏置"
-        ],
+        q: "Au(111)/水 的输入里同时开了 UKS、SMEAR 和 ADDED_MOS 500。如果去掉 ADDED_MOS，最直接的后果是？",
+        options: ["SCF 无法处理费米能级以上的占据，展宽等于失效，能量与力都不对", "只是少了空轨道，总能量不受影响", "计算会变慢但结果相同", "CP2K 会自动补齐空带"],
         answer: 0,
-        explain: "TIMECON 以 fs 计，表示恒温器把温度拉回目标的快慢；默认 1000 fs 对短轨迹几乎等于不控温。"
+        explain: "SMEAR 允许部分占据，被占据的态可能高于原始占据轨道数，必须有额外空带可用。不给 ADDED_MOS，可用的轨道数不够，展宽方案没有足够的态去摊电子，能量与力都会出错。"
       },
       {
-        q: "体系要允许晶胞三个方向独立变形，应选哪个系综？",
-        options: ["NVT", "NVE", "NPT_I", "NPT_F"],
-        answer: 3,
-        explain: "NPT_I 只做各向同性缩放，NPT_F 才允许晶胞形状与各轴长度独立变化。"
+        q: "&OUTER_SCF 在这个 OT 输入里 EPS_SCF 1.0E-5、MAX_SCF 100，实际输出是内层 83 步、外层 2 轮。这说明什么？",
+        options: ["内层已经收敛，外层是在检查轨道旋转梯度是否也达标，再补跑一轮", "内层没收敛，靠外层补救", "总步数是 83 × 2 = 166", "外层循环只检查能量"],
+        answer: 0,
+        explain: "内层 OT 最小化在 83 步达到 1e-6，外层随后检查轨道旋转梯度是否满足 1e-5，不满足就再跑一轮内层（这里又跑了 100 步以内），合计 183 步。两层判据针对不同的量，不能相乘。"
       },
       {
-        q: "关于 CP2K 的恒温器，下面哪句是错的？",
-        options: [
-          "TYPE 默认是 NOSE",
-          "常规 NVT 生产推荐 CSVR",
-          "TYPE 里可以直接选 BERENDSEN",
-          "ENSEMBLE LANGEVIN 配合 &MD%&LANGEVIN%GAMMA 使用"
-        ],
-        answer: 2,
-        explain: "CP2K 的 THERMOSTAT TYPE 没有 BERENDSEN 这一项；想要更强的控温应把 CSVR 的 TIMECON 调小。"
-      },
-      {
-        q: "轨迹跑了 500 步后要续算，正确做法是？",
-        options: [
-          "取轨迹最后一帧坐标，重新生成速度",
-          "用 PROJECT-1.restart，它包含速度与恒温器状态",
-          "重新从初始结构开始，把 STEPS 改成 500",
-          "把 .ener 文件最后一行的能量读进来当初始能量"
-        ],
+        q: "对比 OT 与对角化的总能时，第一步应该做什么？",
+        options: ["直接比较 Total energy", "把对角化结果里的电子熵项（−TS_el）加回去归一再比", "把两者的 CUTOFF 调成一样再比", "取两者的平均值"],
         answer: 1,
-        explain: "restart 文件保存了坐标、速度以及恒温器/恒压器的内部变量；手工从轨迹重启会丢失速度与热浴历史。"
+        explain: "开了 SMEAR 的对角化结果，Total energy 已含 −TS_el。直接相减会把热力学项当成数值误差；归一到同一基准后，两者相差约 1e-4 Ha。"
+      },
+      {
+        q: "meta-qmmm 里 &KIND CU_FIX 的 MASS 设成 1e9，作用是？",
+        options: ["让这些原子在动力学中几乎不动，充当冻结壁", "提高 EAM 势的精度", "让 CP2K 忽略这些原子", "加快 SCF 收敛"],
+        answer: 0,
+        explain: "质量极大 → 加速度极小，积分器自然把它们冻在原位。比逐原子加约束省事，也不会引入约束算法带来的能量项；代价是这些原子仍参与力场计算，只是不移动。"
+      },
+      {
+        q: "同体系 slab 计算里，真空区的静电势曲线出现明显斜率，最合理的处理是？",
+        options: ["把真空加厚，并检查是否需要 SURFACE_DIPOLE_CORRECTION", "把 SURF_DIP_DIR 从 Z 改成 X", "降低 CUTOFF", "把固定层扩大到全部原子"],
+        answer: 0,
+        explain: "斜率说明 slab 上下不对称带来净偶极。加厚真空减小周期像相互作用，偶极校正消除虚假电场；改方向或降截断都不解决物理问题。"
       }
     ],
     terms: [
-      { t: "系综", en: "Ensemble", d: "一组宏观约束下所有微观状态的集合；在输入里表现为固定哪些热力学量。" },
-      { t: "恒温器", en: "Thermostat", d: "让体系维持目标温度的机制，CP2K 中由 &MD%&THERMOSTAT 控制。" },
-      { t: "恒压器", en: "Barostat", d: "让体系维持目标外压、允许晶胞变化的机制，由 &MD%&BAROSTAT 控制。" },
-      { t: "时间步", en: "Timestep", d: "相邻两个 MD 步之间的物理时间，默认 0.5 fs，决定能分辨的最高频率。" },
-      { t: "平衡段", en: "Equilibration", d: "丢弃的初始阶段，用于让温度、密度、局部结构达到稳定。" },
-      { t: "生产段", en: "Production run", d: "真正用来做统计分析的轨迹段，必须在平衡之后开始计。" },
-      { t: "外推", en: "Extrapolation", d: "用前几步波函数外推下一步初猜，减少 AIMD 每步的 SCF 迭代。" }
+      { t: "板模型", en: "slab model", d: "把体相沿某晶面切开、在法向留真空的周期性模型，用有限层数模拟半无限固体表面；厚度、真空、固定层是三个关键参数。" },
+      { t: "偶极校正", en: "dipole correction", d: "针对 slab 上下表面不对称造成的虚假电场所做的解析修正；CP2K 里用 SURFACE_DIPOLE_CORRECTION 与 SURF_DIP_DIR 打开，与加真空互补。" },
+      { t: "固定层", en: "fixed atoms layer", d: "在几何优化或 MD 中被钉住的原子集合，通常取远离界面的体相层，用来模拟半无限固体并抑制 slab 整体漂移。" },
+      { t: "轨道变换", en: "orbital transformation (OT)", d: "不解本征值问题、直接最小化能量对轨道旋转泛函的求解路线；内存省、适合大体系，但要求体系有足够带隙。" },
+      { t: "外层 SCF", en: "outer SCF (OUTER_SCF)", d: "把 SCF 分成内外两层：内层做 OT 或对角化，外层检查轨道旋转梯度是否达标，不达标再补一轮，用于难收敛体系。" },
+      { t: "德法模型", en: "DFT+U", d: "对强关联的局域轨道（如 Ti 3d）加 Hubbard 惩罚项，修正 GGA 对 d 电子过度离域的倾向；CP2K 用 PLUS_U_METHOD 选投影方式。" },
+      { t: "QM/MM", en: "quantum mechanics / molecular mechanics", d: "QM 区用第一性原理或半经验方法、MM 区用力场的分层计算；关键问题是切口、静电嵌入与两区之间的能量混合方式。" },
+      { t: "元动力学", en: "metadynamics", d: "沿少数集合变量不断沉积高斯偏置势，把体系推出局部极小，再从 HILLS 记录重建自由能面；墙用来限定采样区域。" }
     ],
     sources: [
-      { t: "CP2K 手册：Molecular Dynamics", url: "https://manual.cp2k.org/trunk/methods/sampling/molecular_dynamics.html" },
-      { t: "CP2K 手册：Langevin Dynamics", url: "https://manual.cp2k.org/trunk/methods/sampling/langevin_dynamics.html" },
-      { t: "输入参考：MOTION/MD", url: "https://manual.cp2k.org/trunk/CP2K_INPUT/MOTION/MD.html" },
-      { t: "输入参考：MOTION/MD/THERMOSTAT", url: "https://manual.cp2k.org/trunk/CP2K_INPUT/MOTION/MD/THERMOSTAT.html" }
+      { t: "CP2K 手册：&FORCE_EVAL/&QMMM（QM/MM 原生接口）", url: "https://manual.cp2k.org/trunk/CP2K_INPUT/FORCE_EVAL/QMMM.html" },
+      { t: "CP2K 手册：QM/MM 方法总览", url: "https://manual.cp2k.org/trunk/methods/qm_mm/index.html" },
+      { t: "CP2K 手册：内置力场与 QM/MM 的力场组合", url: "https://manual.cp2k.org/trunk/methods/qm_mm/builtin.html" },
+      { t: "CP2K 手册：&FORCE_EVAL/&MIXED（多力场混合与 GENMIX）", url: "https://manual.cp2k.org/trunk/CP2K_INPUT/FORCE_EVAL/MIXED.html" },
+      { t: "CP2K 手册：&FORCE_EVAL/METHOD FIST 与 &MM 力场", url: "https://manual.cp2k.org/trunk/CP2K_INPUT/FORCE_EVAL/MM.html" },
+      { t: "CP2K 手册：&FREE_ENERGY/&METADYN（元动力学）", url: "https://manual.cp2k.org/trunk/CP2K_INPUT/MOTION/FREE_ENERGY/METADYN.html" },
+      { t: "CP2K 手册：&SUBSYS/&COLVAR（集合变量定义）", url: "https://manual.cp2k.org/trunk/CP2K_INPUT/FORCE_EVAL/SUBSYS/COLVAR.html" }
     ]
   };
 })();

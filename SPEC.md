@@ -47,7 +47,7 @@
 }
 ```
 
-- `part` 只能是：`准备`、`上手`、`DFT 核心`、`结构与振动`、`动力学`、`分析与性质`、`进阶与工程`。
+- `part` 只能是：`准备`、`上手`、`DFT 核心`、`结构与振动`、`动力学`、`分析与性质`、`进阶与工程`、`课程实战`。
 - `sections[].id`：`"3.1"` 这种；页面锚点 `#/ch03/3-1`。
 - `sources`：`[{ t: "Run a First Calculation", url: "https://manual.cp2k.org/trunk/getting-started/first-calculation.html" }]`。
 
@@ -105,59 +105,60 @@
 
 ## 6. 章节清单与分工
 
-| 章 | 标题 | 部分 | 核心内容 |
-|---|---|---|---|
-| ch01 | 认识 CP2K | 准备 | 能做什么/不能做什么、Quickstep 与 GPW 一句话、生态与许可证、学习路线 |
-| ch02 | 安装与运行环境 | 准备 | 二进制发行版、Spack、源码编译、MPI/OpenMP、验证安装 |
-| ch03 | 第一个计算：水的单点能 | 上手 | h2o.inp 逐段拆解、运行、看输出、能量在哪 |
-| ch04 | 输入文件解剖 | 上手 | `&SECTION` 树、大小写/单位/注释、include、变量、常用顶层结构 |
-| ch05 | 运行控制与输出 | 上手 | 命令行、-i/-o、restart、输出文件结构、日志与报错、批量脚本 |
-| ch06 | GPW 与格点：CUTOFF 与 REL_CUTOFF | DFT 核心 | 高斯基组+平面波辅助、多网格、收敛测试、成本 |
-| ch07 | 基组与赝势 | DFT 核心 | GTH 赝势、MOLOPT、基组文件、q 值匹配、BSSE、基组选择 |
-| ch08 | 泛函、色散与 DFT+U | DFT 核心 | LDA/GGA/meta-GGA/hybrid、D3、+U、何时用哪个 |
-| ch09 | SCF 收敛与 OT | DFT 核心 | DIIS/混合、smearing、OT、收敛判据、失败诊断 |
-| ch10 | 周期性、k 点与自旋 | DFT 核心 | 晶胞、k 点网格、Γ 点、自旋极化、磁性体系 |
-| ch11 | 几何优化与晶胞优化 | 结构与振动 | GEO_OPT、CELL_OPT、优化器、约束、收敛判据 |
-| ch12 | 过渡态与 NEB | 结构与振动 | CI-NEB、band、弹簧常数、反应路径验证 |
-| ch13 | 振动与热化学 | 结构与振动 | VIBRATIONAL_ANALYSIS、频率、ZPE、热化学、虚频 |
-| ch14 | 分子动力学 | 动力学 | MD 输入、系综、恒温器、时间步、轨迹分析 |
-| ch15 | 增强采样 | 动力学 | metadynamics、约束 MD、伞形采样、Langevin |
-| ch16 | 电子结构分析 | 分析与性质 | PDOS/LDOS、能带、电荷布居、分子轨道、 cube 文件 |
-| ch17 | 光谱与激发态 | 分析与性质 | IR/Raman、TDDFT、XAS 概览、光谱流程 |
-| ch18 | 高级方法：QM/MM、隐式溶剂、ML | 进阶与工程 | QM/MM、SMD、机器学习势接口（概览+入口） |
-| ch19 | 性能与并行 | 进阶与工程 | MPI/OpenMP 布局、ELPA/GPU、内存、I/O、性能排查 |
-| ch20 | 排错手册 | 进阶与工程 | 常见报错→原因→修复，SCF 不收敛、几何爆炸、内存不足、MPI 崩溃 |
-| ch21 | 科研实战配方 | 进阶与工程 | 电催化/AIMD 工作流、收敛测试模板、数据管理、可复现性清单 |
+本版以《庚子计算·AIMD 与 CP2K 讲义》1–5 为主干（`_src/course/lecture_1..5.txt`），官方手册负责参数与边界的准确性，旧站内容只作参考。全站 15 章 / 6 部分。
+
+| 章 | 标题 | 部分 | 核心内容 | 主素材 |
+|---|---|---|---|---|
+| ch01 | 认识 CP2K：方法版图与能力边界 | 起步 | 能做什么、GPW 一句话、速度从哪来、与 VASP 的分工、学习路线 | lecture_1/2、旧 ch01 |
+| ch02 | AIMD 基础：势能面、系综与时间步 | 起步 | PES、BOMD/Ehrenfest、NVE/NVT/NPT、温控、时间步、相关函数、VASP 参数对照 | lecture_1、manual MD |
+| ch03 | 安装与运行 | 起步 | ssmp/popt/psmp、源码编译、Spack/容器、Slurm 脚本、MPI×OMP、验证安装 | lecture_2、manual installation |
+| ch04 | 输入文件与计算流程 | 输入与体系 | &SECTION 语法、四层结构、RUN_TYPE、提交脚本、输出文件、restart、五类输入错误 | lecture_2/3、旧 ch03–05 |
+| ch05 | 基组、赝势、坐标与建模 | 输入与体系 | MOLOPT 基组、GTH 赝势与 q 值、&COORD/&CELL、slab/水盒/packmol、&KIND | lecture_2/3、manual basis_sets |
+| ch06 | GPW、网格与 CUTOFF 收敛 | 电子结构 | 高斯基组+辅助网格、多网格映射、CUTOFF/REL_CUTOFF 收敛、NGRIDS、GAPW | lecture_3、howto_converging_cutoff |
+| ch07 | 泛函、色散、DFT+U、磁性、杂化 | 电子结构 | PBE/BLYP/TPSS、D3/D4、&DFT_PLUS_U、UKS/磁性、PBE0/HSE+ADMM | lecture_3/4、Hybrid_Functionals |
+| ch08 | SCF：OT、对角化、展宽与混合 | 电子结构 | OT 路线、DIAGONALIZATION、MIXING BROYDEN、SMEAR/ADDED_MOS、EPS_SCF、不收敛诊断 | lecture_3、manual convergence |
+| ch09 | 几何/晶胞优化与过渡态 | 结构与振动 | GEO_OPT、CELL_OPT、约束、CI-NEB、DIMER、初末态与验证 | lecture_3、manual optimization |
+| ch10 | 频率、振动光谱与 TRAVIS | 结构与振动 | VIBRATIONAL_ANALYSIS、虚频、IR/Raman、热化学、TRAVIS 工作流 | lecture_4、travis pdf |
+| ch11 | AIMD 实战：系综、温控、约束与续算 | 动力学与自由能 | &MD、NOSE/CSVR/GLE、ASPC、重启、约束 MD、能量守恒、Au-H2O 案例 | lecture_4、练习 Au-H2O |
+| ch12 | 增强采样与自由能面 | 动力学与自由能 | blue-moon/PMF、slow-growth、metadynamics、COLVAR/HILLS、收敛判断、meta-qmmm | lecture_4/5 |
+| ch13 | 轨迹与电子结构分析 | 分析与实战 | RDF/MSD、cp2k2gro、DOS/PDOS、电荷/ELF/MO/静电势/功函数、能带 | lecture_4、练习 Au-TiO2 |
+| ch14 | 表面+水与 QM/MM 案例 | 分析与实战 | slab 与真空、水盒界面、Au-H2O/cuh2o/Au-TiO2 案例、QM/MM、GENMIX | 练习全部输入 |
+| ch15 | 发表级工作流 | 分析与实战 | 收敛证据链、误差预算、可复现、性能布局、方法段模板、错误速查 | lecture_2/3、旧 ch19–21 |
 
 ## 7. 术语统一（首次出现给英文）
 
 - 赝势 pseudopotential；基组 basis set；平面波 plane wave；截断能 cutoff；辅助网格 multigrid；自洽场 SCF；轨道变换 orbital transformation (OT)；几何优化 geometry optimization；过渡态 transition state； nudged elastic band (NEB)；分子动力学 molecular dynamics (MD)；径向分布函数 RDF；态密度 DOS；投影态密度 PDOS；广义梯度近似 GGA；杂化泛函 hybrid functional；色散校正 dispersion correction；k 点 k-point；自旋极化 spin polarization；周期性边界条件 PBC。
 
-## 8. 手册来源地图（写章节时先读这些文件）
+## 8. 素材地图（写章节时先读这些）
 
-所有源文件在 `cp2k-learn/_src/narrative/`，文件名为 doc 路径把 `/` 换成 `__` 再加 `.json`，`markdown` 字段是正文。
+课程讲义文本（PDF 已解密抽取，`cp2k-learn/_src/course/`）：
+
+- `lecture_1.txt`：量子化学/第一性原理/MD 基础、AIMD 基础、VASP AIMD 参数、后处理 → ch01/ch02
+- `lecture_2.txt`：CP2K 简介与编译、复杂模型建模、计算流程与参数详解 → ch01/ch03/ch04/ch05/ch15
+- `lecture_3.txt`：基组赝势坐标读入、输出文件、几何/晶胞优化、过渡态 → ch04/ch05/ch06/ch07/ch09
+- `lecture_4.txt`：频率、AIMD 详解、DFT+U/磁性/杂化、电子结构分析、限制性 AIMD、PMF/Metadynamics、TRAVIS → ch07/ch10/ch11/ch12/ch13
+- `lecture_5.txt`：自由能面（blue-moon/PMF、slow-growth、metadynamics）→ ch12
+- 辅助：`CP2K_Input_Basics.txt`、`howto_static_calculation.txt`、`howto_geometry_optimisation.txt`、`howto_converging_cutoff.txt`、`events_2018_summer_school_scf_setup.txt`、`hutter-bomd.txt`、`iannuzzi.txt`、`Hybrid_Functionals.txt`、`travis-quickstart.txt`、`travis_ir_raman.txt`、`_强烈推荐-庚子计算整理_CP2K使用入门.txt`
+
+官方手册正文（`_src/narrative/`，文件名 = doc 路径 `/`→`__` + `.json`，正文在 `markdown`；关键词在 `js/data/keywords.js`）：
 
 - ch01：`index`、`getting-started__foreword-and-faq`、`methods__dft__index`
-- ch02：`getting-started__installation`、`build-from-source`、`build-with-spack`、`distributions`、`macos`、`troubleshooting`
-- ch03：`getting-started__first-calculation`
-- ch04：`CP2K_INPUT`（Input Reference 首页）、`getting-started__first-calculation`
-- ch05：`getting-started__troubleshooting`、`methods__restarting`、`development__print-keys`
-- ch06：`methods__dft__cutoff`、`methods__dft__gpw`、`methods__dft__gapw`
-- ch07：`methods__dft__basis_sets`、`methods__dft__pseudopotentials`
-- ch08：`methods__dft__index`、`methods__dft__hartree-fock__index`、`methods__dft__local_ri`
-- ch09：`methods__dft__convergence`、`methods__dft__orbital_transformation`、`methods__dft__linear_scaling`
-- ch10：`methods__dft__k-points`、`methods__electronic_structure__band__index`
-- ch11：`methods__optimization__geometry_and_cell_opt`
-- ch12：`methods__optimization__nudged_elastic_band`
-- ch13：`methods__properties__index`、`methods__properties__infrared`、`methods__properties__raman`
-- ch14：`methods__sampling__molecular_dynamics`、`methods__sampling__langevin_dynamics`
-- ch15：`methods__sampling__metadynamics`、`methods__sampling__constrained_dynamics`、`methods__sampling__monte_carlo`
-- ch16：`methods__electronic_structure__dos`、`band__index`、`population__index`、`molecular_orbitals`
-- ch17：`methods__properties__optical__tddft`、`x-ray__index`、`infrared`、`raman`
-- ch18：`methods__qm_mm__index`、`builtin`、`implicit_solvation`、`machine_learning__index`、`nnp`
-- ch19：`technologies__eigensolvers__index`、`elpa`、`accelerators__index`、`cuda`
-- ch20：`getting-started__troubleshooting`、`methods__dft__convergence`、`development__error-handling`
-- ch21：综合 ch03/06/11/14 的来源
+- ch02：`methods__sampling__molecular_dynamics`、`langevin_dynamics`
+- ch03：`getting-started__installation`、`build-from-source`、`build-with-spack`、`distributions`、`troubleshooting`
+- ch04：`getting-started__first-calculation`、`CP2K_INPUT`、`methods__restarting`
+- ch05：`methods__dft__basis_sets`、`methods__dft__pseudopotentials`
+- ch06：`methods__dft__gpw`、`methods__dft__cutoff`、`methods__dft__gapw`
+- ch07：`methods__dft__hartree-fock__index`、`methods__dft__local_ri`、`CP2K_INPUT/FORCE_EVAL/DFT/XC`
+- ch08：`methods__dft__convergence`、`methods__dft__orbital_transformation`、`methods__dft__linear_scaling`
+- ch09：`methods__optimization__geometry_and_cell_opt`、`methods__optimization__nudged_elastic_band`
+- ch10：`methods__properties__infrared`、`raman`、`CP2K_INPUT/MOTION/VIBRATIONAL_ANALYSIS`
+- ch11：`methods__sampling__molecular_dynamics`、`CP2K_INPUT/MOTION/MD`
+- ch12：`methods__sampling__metadynamics`、`methods__sampling__constrained_dynamics`
+- ch13：`methods__electronic_structure__dos`、`band__index`、`population__index`、`molecular_orbitals`
+- ch14：`methods__qm_mm__index`、`builtin`、`CP2K_INPUT/FORCE_EVAL/QMMM`
+- ch15：`getting-started__troubleshooting`、`technologies__eigensolvers__index`、`elpa`
+
+课程练习（真实输入/输出，`D:\夸克\AJ41-CP2K课程\练习\`）：`Au-H2O`（AIMD + RDF）、`cuh2o`（OT vs 对角化）、`Au-TiO2`（DFT+U + rdf/rmsd）、`h2o`（cp2k/vasp 对照）、`meta-qmmm`（2936 原子 QM/MM 元动力学）、`packmol`（混合体系）、`metadynamics`。
 
 ## 9. 交互 demo 约定
 

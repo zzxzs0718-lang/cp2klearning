@@ -41,18 +41,21 @@
         '<div class="demo-note" data-msg></div>' +
         '<div class="demo-note">这是一个<b>教学示意模型</b>：残差按每步固定倍率衰减，用来对比三种策略的收敛速度，不是真实的 CP2K 求解。真实计算中 DIIS 可能震荡、OT 也可能在坏初始猜测下发散。</div>';
 
-      const get = (k) => el.querySelector('[data-k="' + k + '"]');
       const svg = el.querySelector("[data-svg]");
       const msg = el.querySelector("[data-msg]");
       const aval = el.querySelector("[data-aval]");
+      const kindEl = el.querySelector('[data-k="kind"]');
+      const alphaEl = el.querySelector('[data-k="alpha"]');
+      const epsEl = el.querySelector('[data-k="eps"]');
+      const hardEl = el.querySelector('[data-k="hard"]');
 
       const paint = () => {
-        const kind = get("kind").value;
-        const alpha = +get("alpha").value;
-        const epsExp = +get("eps").value;
-        const hard = get("hard").value === "1";
+        const kind = kindEl.value;
+        const alpha = +alphaEl.value;
+        const epsExp = +epsEl.value;
+        const hard = hardEl.value === "1";
         aval.textContent = alpha.toFixed(2);
-        get("alpha").disabled = kind === "ot";
+        alphaEl.disabled = kind === "ot";
         const pts = simulate(kind, alpha, epsExp, hard);
         const last = pts[pts.length - 1];
         const conv = last.e <= epsExp;

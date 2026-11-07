@@ -4,632 +4,475 @@
     id: "ch10",
     num: 10,
     part: "结构与振动",
-    title: "周期性、k 点与自旋",
-    subtitle: "从只算 Γ 点，到金属体系的网格与自旋设置",
-    hours: 2.5,
-    level: "进阶",
+    title: "频率、振动光谱与 TRAVIS",
+    subtitle: "从 Hessian 到 IR/Raman 谱，再到轨迹后处理",
+    hours: 4.5,
+    level: "高级",
     intro:
-      "把分子放进周期性盒子之后，电子波函数多了一个倒空间标签 k。任何要在布里渊区上积分的量——能量、密度、力——都被一个有限网格近似掉。这一章讲清三件事：网格怎么选、对称性替你省了什么、以及自旋与金属占据为什么会让同一个体系变得难收敛。",
+      "优化收敛只说明你站在一个驻点上，不说明它是极小点；实验谱上的每个峰，也要能从简正模式里找到对应。这一章先把频率算对：有限差分 Hessian、虚频判据、IR/Raman 强度的前置开关、热化学的适用边界；再把含 Wannier 中心的轨迹交给 TRAVIS，做出能和实验对比的谱图。",
     goals: [
-      "说清 k 点网格在近似什么，以及省略 &KPOINTS 时 CP2K 实际在算什么",
-      "用 MONKHORST-PACK、MACDONALD、GENERAL 三种 SCHEME 写出正确的网格，并读出 UNITS 的含义",
-      "画出 k 点收敛曲线，判断总能量、力、金属占据各自需要多密的网格；判断哪些体系 Γ 点就够",
-      "用 UKS + MULTIPLICITY + MAGNETIZATION 设置自旋态，用 &SMEAR 处理金属占据",
+      "写出可运行的频率输入，并说清 RUN_TYPE 与顶层 &VIBRATIONAL_ANALYSIS 的位置",
+      "用虚频数目区分极小点、过渡态与未收敛结构，解释 3N−6 与刚体模式投影",
+      "打开 IR/Raman 强度所需的前置设置，读懂强度表与周期性体系的偶极处理",
+      "用 THERMOCHEMISTRY 得到 ZPE、熵与吉布斯自由能，并说明 RRHO 的边界",
+      "用 Wannier 中心轨迹配合 TRAVIS，产出 IR/Raman 谱与可复现的输入记录",
     ],
     sections: [
       {
         id: "10.1",
-        title: "k 点到底在近似什么",
+        title: "先优化，再算频率：最小输入",
         blocks: [
           {
             type: "p",
-            text: "晶体里电子波函数是 Bloch 波 $\\psi_{n\\mathbf{k}}(\\mathbf{r}) = e^{i\\mathbf{k}\\cdot\\mathbf{r}} u_{n\\mathbf{k}}(\\mathbf{r})$，标签 $\\mathbf{k}$ 跑遍第一布里渊区。总能量、电子密度、Hellmann–Feynman 力，全都要对 $\\mathbf{k}$ 做积分——这个积分没有解析解，只能数值近似。",
-          },
-          {
-            type: "formula",
-            tex: "\\frac{1}{\\Omega_{\\mathrm{BZ}}}\\int_{\\mathrm{BZ}} f(\\mathbf{k})\\,d\\mathbf{k} \\;\\approx\\; \\sum_{\\mathbf{k}} w_{\\mathbf{k}}\\, f(\\mathbf{k})",
-            caption: "CP2K 的做法：用有限个加权 k 点代替整块布里渊区",
+            text: "频率是能量对原子坐标的二阶导数，必须在驻点取值。几何没优化干净，残余梯度会混进 Hessian，低频模式首先被污染，表现为一串忽大忽小的虚频。所以流程永远是：**优化到所有力判据达标 → 再算频率**，不要用单点结构直接开频率。",
           },
           {
             type: "p",
-            text: "`&DFT` 下的 `&KPOINTS` 定义的就是这组采样点。**省略它不等于「不做 k 点计算」，而是只算 Γ 点**（$\\mathbf{k}=0$）——`SCHEME GAMMA` 是它的显式写法。所以「要不要加 k 点」这个问题的真实形式是：**只取 Γ 点时，积分误差有多大？**",
+            text: "和单点输入相比只改两处：`RUN_TYPE` 改成 `VIBRATIONAL_ANALYSIS`，并在文件末尾加一个 `&VIBRATIONAL_ANALYSIS`。当前手册把它列为==顶层节==，与 `&FORCE_EVAL`、`&MOTION` 平级；旧教程常写在 `&MOTION` 下，照抄前先核对你的 CP2K 版本。",
+          },
+          {
+            type: "code",
+            lang: "cp2k",
+            title: "h2o_freq.inp：水分子频率（示例坐标，请换成你的优化结果）",
+            text: `&GLOBAL
+  PROJECT h2o_freq
+  RUN_TYPE VIBRATIONAL_ANALYSIS
+&END GLOBAL
+&FORCE_EVAL
+  METHOD Quickstep
+  &DFT
+    BASIS_SET_FILE_NAME BASIS_MOLOPT
+    POTENTIAL_FILE_NAME GTH_POTENTIALS
+    &SCF
+      EPS_SCF 1.0E-8
+    &END SCF
+    &XC
+      &XC_FUNCTIONAL PBE
+      &END XC_FUNCTIONAL
+    &END XC
+  &END DFT
+  &SUBSYS
+    &CELL
+      ABC 10.0 10.0 10.0
+    &END CELL
+    &COORD
+      O 0.0000 0.0000 0.0000
+      H 0.0000 0.7570 0.5870
+      H 0.0000 -0.7570 0.5870
+    &END COORD
+    &KIND H
+      BASIS_SET DZVP-MOLOPT-SR-GTH
+      POTENTIAL GTH-PBE-q1
+    &END KIND
+    &KIND O
+      BASIS_SET DZVP-MOLOPT-SR-GTH
+      POTENTIAL GTH-PBE-q6
+    &END KIND
+  &END SUBSYS
+&END FORCE_EVAL`,
+          },
+          {
+            type: "code",
+            lang: "cp2k",
+            title: "文件末尾的频率设置",
+            text: `&VIBRATIONAL_ANALYSIS
+  DX 1.0E-2
+  &PRINT
+    &MOLDEN_VIB
+      FILENAME h2o_freq
+    &END MOLDEN_VIB
+    &HESSIAN
+      FILENAME h2o_freq.hess
+    &END HESSIAN
+  &END PRINT
+&END VIBRATIONAL_ANALYSIS`,
           },
           {
             type: "p",
-            text: "判断标准很朴素：Γ 点近似相当于假设被积函数在布里渊区里变化平缓。绝缘体、分子晶体、大超胞满足得比较好；金属的占据数在费米面处跳变，小晶胞的半导体的带边也很陡，这两类体系只算 Γ 点会系统性算错。",
-          },
-          {
-            type: "key",
-            items: [
-              { k: "&KPOINTS", v: "定义 SCF 采样网格；不写就是 Γ-only", tag: "核心" },
-              { k: "SCHEME MONKHORST-PACK", v: "最常用：给三个方向的网格数，均匀铺开", tag: "常用" },
-              { k: "GAMMA_CENTERED", v: "是否让网格包含 Γ 点；偶网格时默认不含", tag: "易错" },
-              { k: "UNITS", v: "KPOINT 坐标的单位，默认 B_VECTOR（倒格矢分数坐标）", tag: "单位" },
-              { k: "WAVEFUNCTIONS", v: "k 点计算默认 COMPLEX；REAL 只在 Γ 或实 Bloch 相位时成立", tag: "默认值" },
-            ],
+            text: "`&MOLDEN_VIB` 写出 `h2o_freq.molden`，用 Molden 或 VMD 打开就能看每个模式怎么动；`&HESSIAN` 把矩阵本身落盘，方便换单位或做二次分析。第一轮先只要频率，不打开强度和热化学——确认没有意外虚频，再花钱。",
           },
           {
             type: "callout",
-            kind: "info",
-            title: "k 点 ≠ 能带",
-            text: "&KPOINTS 是**为了算积分**而选的点，结果只给你一个总能量。要画能带图，得另外用 `&DFT %PRINT %BAND_STRUCTURE` 配 `&KPOINT_SET` 指定一条高对称路径——那是后处理，和 SCF 采样是两套东西，不要混在同一个块里。",
+            kind: "key",
+            title: "盒子与坐标",
+            text: "上面的 10 Å 盒子给分子留真空，周期镜像仍在，但对水分子频率的影响很小。坐标是标准水几何的示意值，真实计算必须用你自己优化后的结构；频率对键长非常敏感，差 0.01 Å 就能让高频峰移动十几个 cm⁻¹。",
           },
         ],
       },
       {
         id: "10.2",
-        title: "一个能跑的体相输入",
+        title: "Hessian、3N−6 与虚频判据",
         blocks: [
           {
             type: "p",
-            text: "下面用金刚石结构的硅做例子。用的是**原胞**：2 个原子、边长 $a/\\sqrt{2}$ 的菱形 cell（三个夹角 60°），比 8 原子的常规立方胞小四倍，扫 k 点网格时省得多。坐标用分数坐标写（`SCALED T`）。你的体系当然要换成自己的 cell——这一节只关心那四行 `&KPOINTS`。",
+            text: "Hessian 是 $3N\\times 3N$ 的矩阵，元素是能量对两个坐标分量的二阶偏导。用原子质量加权、对角化，得到 $3N$ 个本征值 $\\lambda_i$；本征值的平方根给出角频率，再除以 $2\\pi c$ 就是常见的波数。",
           },
           {
-            type: "code",
-            lang: "cp2k",
-            title: "si_kpoints.inp",
-            text: `&GLOBAL
-  PROJECT si
-  RUN_TYPE ENERGY
-&END GLOBAL
-&FORCE_EVAL
-  METHOD Quickstep
-  &DFT
-    BASIS_SET_FILE_NAME BASIS_MOLOPT
-    POTENTIAL_FILE_NAME GTH_POTENTIALS
-    &SCF
-      EPS_SCF 1.0E-7
-      &OT
-        MINIMIZER DIIS
-      &END OT
-    &END SCF
-    &KPOINTS
-      SCHEME MONKHORST-PACK 4 4 4
-      GAMMA_CENTERED T
-    &END KPOINTS
-    &XC
-      &XC_FUNCTIONAL PBE
-    &END XC_FUNCTIONAL
-    &END XC
-  &END DFT
-  &SUBSYS
-    &CELL
-      ABC 3.8396 3.8396 3.8396
-      ALPHA_BETA_GAMMA 60 60 60
-    &END CELL
-    &COORD
-      SCALED T
-      Si 0.00 0.00 0.00
-      Si 0.25 0.25 0.25
-    &END COORD
-    &KIND Si
-      BASIS_SET DZVP-MOLOPT-SR-GTH
-      POTENTIAL GTH-PBE-q4
-    &END KIND
-  &END SUBSYS
-&END FORCE_EVAL`,
+            type: "formula",
+            tex: "\\tilde{\\nu}_i=\\frac{1}{2\\pi c}\\sqrt{\\lambda_i}",
           },
           {
             type: "p",
-            text: "`EPS_SCF 1.0E-7` 比单点默认更严一档：k 点网格加密时能量变化本来就在 10⁻³–10⁻⁴ Hartree 量级，SCF 噪声要是同量级，收敛曲线就是假的。算力和精度在这里必须同时加。为了让输入短到能一眼看完，这里省掉了 `&MGRID`——CUTOFF 用默认值；正式计算按第 6 章讲的方法把它收敛一遍再加回来。",
+            text: "其中 6 个模式对应整体平动与转动（线性分子是 5 个），频率接近 0；剩下的 $3N-6$ 个才是真正的振动。CP2K 默认会把整体转动从 Hessian 里清掉，所以频率表不会从 0 开始；做固体或带约束的体系时，用 `FULLY_PERIODIC T` 关掉这个清理，避免把真正的低频声子当成刚体模式删掉。",
           },
           {
-            type: "table",
-            head: ["块", "管什么", "本例的取值"],
-            rows: [
-              ["`&CELL`", "晶胞矢量与周期性方向", "菱形原胞，边长 3.8396 Å、夹角 60°"],
-              ["`&COORD` + `SCALED T`", "原子位置，分数坐标", "2 个 Si，金刚石结构"],
-              ["`&KPOINTS`", "SCF 采样的 k 点集", "MONKHORST-PACK 4×4×4，含 Γ"],
-              ["`&SCF`", "电子结构求解", "OT + EPS_SCF 1E-7"],
+            type: "p",
+            text: "本征值为负时，频率是虚数。CP2K 在频率表里直接写成负数，例如 `-123.4`，不会加 `i` 前缀。看到负数就去数个数，而不是盯着绝对值猜。",
+          },
+          {
+            type: "key",
+            items: [
+              { k: "0 个虚频", v: "极小点；结构可以作为热力学与谱计算的起点" },
+              { k: "1 个虚频", v: "一阶鞍点，通常就是过渡态；用 MOLDEN_VIB 确认它连接的反应坐标" },
+              { k: "多个虚频", v: "高阶鞍点，或几何/SCF 没收敛；先收紧优化与 EPS_SCF 再重算" },
+              { k: "低频小虚频", v: "常见于弱相互作用、近简并或数值噪声；做 DX 敏感性测试" },
             ],
           },
           {
-            type: "callout",
-            kind: "tip",
-            title: "先跑 2×2×2 再加密",
-            text: "第一次跑新体系，把 `SCHEME` 降到 `2 2 2`，确认几何、赝势、基组都没问题、SCF 能收敛，再按 10.4 节的方法往上加。直接上 8×8×8 只会让你在报错时不知道是网格还是别的地方出问题。",
+            type: "demo",
+            id: "units",
+            title: "动手：cm⁻¹、THz 与周期",
+            desc: "在单位演示里把 3300 cm⁻¹ 换成 THz 与飞秒周期，理解为什么 0.5 fs 步长能采样 O–H 伸缩。",
+          },
+          {
+            type: "p",
+            text: "虚频不一定是错误，但**不能带着虚频去报热化学或 IR 谱**。过渡态的频率计算本来就应该有且只有一个虚频；极小点出现虚频，先把几何重新优化到更严的力判据，再检查 `DX` 是否过大、盒子是否太小、是否有原子几乎重叠。",
           },
         ],
       },
       {
         id: "10.3",
-        title: "三种 SCHEME 与它们的单位",
+        title: "数值细节决定频率可信度",
         blocks: [
           {
             type: "p",
-            text: "`SCHEME` 决定网格怎么生成。**MONKHORST-PACK** 只给三个数，均匀铺开，最常用；**MACDONALD** 在同一套网格上再加三个 shift 参数（0 到 1 之间），用来把网格从 Γ 中心挪到别处；**GENERAL** 让你一行一个 `KPOINT` 手写坐标和权重，适合做特殊点检查或复现文献里的点集。",
-          },
-          {
-            type: "code",
-            lang: "cp2k",
-            title: "三种写法",
-            text: `&KPOINTS
-  SCHEME MONKHORST-PACK 6 6 6
-  GAMMA_CENTERED T
-&END KPOINTS
-
-&KPOINTS
-  SCHEME MACDONALD 4 4 4 0.25 0.25 0.25
-&END KPOINTS
-
-&KPOINTS
-  SCHEME GENERAL
-  UNITS B_VECTOR
-  KPOINT 0.0 0.0 0.0 1.0
-  KPOINT 0.5 0.5 0.5 1.0
-&END KPOINTS`,
+            text: "CP2K 用中心差分构造 Hessian：每个原子沿 $\\pm x,\\pm y,\\pm z$ 各位移一次，算一次力。一次完整频率计算的开销约为 **6N 次力计算**，这也是它比几何优化还贵的原因；大体系先想清楚是否只需要部分模式。",
           },
           {
             type: "p",
-            text: "`MACDONALD` 的前三个数是网格，后三个是 shift；shift 取 0.5 就是常见的「偏移网格」。`GENERAL` 的 `KPOINT` 是**三个坐标加一个权重**，坐标单位由 `UNITS` 决定：默认 `B_VECTOR`（倒格矢分数坐标），也可以写 `CART_BOHR` 或 `CART_ANGSTROM`（此时数值是按 2π/Bohr、2π/Å 计的笛卡尔分量）。权重 CP2K 会内部归一化，所以填 1.0 还是 0.5 不影响结果的比例。",
+            text: "`DX` 默认 0.01 Bohr。步长太大，非谐性让频率系统性偏移；步长太小，SCF 噪声会淹没力的差分。手册给的底线是 `EPS_SCF` 收到 1E-8 量级，否则低频不可信；几何也要优化到 `MAX_FORCE` 全部达标，而不是只看能量变化。",
           },
           {
-            type: "table",
-            head: ["SCHEME", "你要给什么", "什么时候用"],
-            rows: [
-              ["`MONKHORST-PACK`", "三个整数网格数", "默认选择，收敛测试就扫它"],
-              ["`MACDONALD`", "三个网格数 + 三个 shift", "需要偏移网格、避开高对称点"],
-              ["`GENERAL`", "逐条 `KPOINT x y z w`", "复现文献点集、只算个别特殊点"],
-              ["`GAMMA`", "什么都不用给", "显式声明 Γ-only（等同于省略该块）"],
+            type: "key",
+            items: [
+              { k: "DX 1.0E-2", v: "有限差分步长，单位 Bohr；默认值，先别改" },
+              { k: "EPS_SCF 1.0E-8", v: "频率计算建议的 SCF 阈值；低频对残差最敏感" },
+              { k: "FULLY_PERIODIC", v: "默认 F；固体/周期体系设 T，避免清理转动模式" },
+              { k: "INTENSITIES", v: "默认 F；打开后算 IR/Raman 强度，需要额外响应设置" },
+              { k: "THERMOCHEMISTRY", v: "默认 F；只对气相分子有意义" },
             ],
           },
           {
             type: "p",
-            text: "一个小陷阱：**偶数的 MONKHORST-PACK 网格默认不包含 Γ 点**。这本身没错（偏移网格往往收敛更快），但如果你要对比「含 Γ」和「不含 Γ」，必须显式写 `GAMMA_CENTERED T`，否则你以为在改网格密度，其实同时在改网格偏移。",
-          },
-          {
-            type: "demo",
-            id: "units",
-            title: "动手：k 点坐标的单位换算",
-            desc: "在 B_VECTOR、2π/Å、2π/Bohr 之间换一换，体会为什么 KPOINT 的数值不能随便抄别人的输入。",
+            text: "频率是二阶导数，对基组、`CUTOFF`、`REL_CUTOFF` 都比能量更敏感。报数之前至少做一次参数校验：把 `DX` 改大或改小 2–5 倍复算同一个模式，把 `CUTOFF` 提高一档，看目标峰的漂移是否小于你声称的精度。",
           },
           {
             type: "callout",
             kind: "warn",
-            title: "抄来的 KPOINT 坐标先看 UNITS",
-            text: "文献里写 `KPOINT 0.5 0.5 0.5`，八成是分数坐标（B_VECTOR）；但同一行数字在 `CART_ANGSTROM` 下是完全不同的点。`&DFT %PRINT %KPOINTS` 加上 `VERBOSE T` 会把 CP2K 实际生成的 k 点列出来——抄参数之后的第一件事就是打出来核对。",
+            title: "不要用默认 SCF 跑低频",
+            text: "优化时 1E-6 的 SCF 残差够用，频率不够。低频模式的力常数很小，残差和数值噪声会直接变成几十 cm⁻¹ 的假峰或假虚频；先把 `EPS_SCF` 收紧，再谈基组。",
           },
         ],
       },
       {
         id: "10.4",
-        title: "收敛测试：扫网格，看曲线拐平",
+        title: "IR 强度：看偶极矩怎么变",
         blocks: [
           {
             type: "p",
-            text: "k 点不像 CUTOFF 那样有唯一「够用」的值，只能对你的体系、你关心的量做收敛测试。做法是固定其他一切，只改网格数，看目标量随网格的变化什么时候平掉。用 shell 循环最省事：",
+            text: "红外吸收来自振动过程中偶极矩的变化。第 $i$ 个模式的强度正比于偶极矩对简正坐标导数的平方：$I_i\\propto|\\partial\\mu/\\partial Q_i|^2$。偶极矩不变的模式（如对称分子的对称伸缩）是 IR 非活性的，算出来强度接近 0，这不是程序出错。",
+          },
+          {
+            type: "p",
+            text: "所以除了 Hessian，还需要**每个位移构型上的偶极矩**。CP2K 里由 `&DFT/&PRINT/&MOMENTS` 提供，最后由 `INTENSITIES T` 把两边拼起来。",
           },
           {
             type: "code",
-            lang: "bash",
-            title: "扫 2→8 的网格",
-            text: `for n in 2 4 6 8; do
-  sed "s/SCHEME MONKHORST-PACK .*/SCHEME MONKHORST-PACK $n $n $n/" si.inp > si_$n.inp
-  cp2k.psmp -i si_$n.inp -o si_$n.out
-  printf "%s  " "$n"
-  grep "Total energy" si_$n.out | tail -1
-done`,
+            lang: "cp2k",
+            title: "让每个位移都输出偶极矩",
+            text: `&FORCE_EVAL
+  METHOD Quickstep
+  &DFT
+    &PRINT
+      &MOMENTS
+      &END MOMENTS
+    &END PRINT
+  &END DFT
+&END FORCE_EVAL`,
+          },
+          {
+            type: "code",
+            lang: "cp2k",
+            title: "打开 IR 强度",
+            text: `&VIBRATIONAL_ANALYSIS
+  DX 1.0E-2
+  INTENSITIES T
+&END VIBRATIONAL_ANALYSIS`,
           },
           {
             type: "p",
-            text: "把四次的总能量抄进一张表，再算相邻两档的差。判断标准是：**差值小于你后续要用的精度**就停。做能量对比（比如反应能）通常要几 meV/atom 的稳定性；只做定性趋势可以松一些。注意别拿 Hartree 和 meV 混着比——一个 Hartree 约 27.2 eV，差 10⁻⁴ Hartree 就是 2.7 meV。",
-          },
-          {
-            type: "table",
-            head: ["你要的量", "收敛快慢", "说明"],
-            rows: [
-              ["总能量", "较快", "平滑体系的积分误差，往往是最先收敛的量"],
-              ["力 / 应力", "较慢", "对占据和带边敏感，几何优化前要单独测"],
-              ["金属占据数 / 费米能", "很慢", "费米面处的跳变让积分收敛变差，必须配 smearing"],
-              ["DOS / 带边位置", "很慢", "本质上是 k 分辨的量，密集网格或特殊方法才靠谱"],
-            ],
-          },
-          {
-            type: "callout",
-            kind: "warn",
-            title: "smearing 不能代替 k 点收敛",
-            text: "给金属加电子温度（smearing）只是把占据数的跳变抹平，让 SCF 能收敛；它**不会**替你补上布里渊区积分的采样误差。两者要分开测：先固定 smearing，扫 k 点；再固定 k 点，扫展宽。加宽 smearing 让能量「看起来稳了」，往往只是把误差藏进了自由能里。",
+            text: "输出里每个模式会多一列强度，常见单位是 km/mol。简并模式共享强度，比较实验谱时要把它们加在一起；低频模式受非谐与数值噪声影响更大，强度不如高频峰可靠，不要拿它去和实验峰高直接比。",
           },
           {
             type: "p",
-            text: "还有一个方向性技巧：**真空方向不需要 k 点**。slab 的法向、nanowire 的两个横向，这些方向的能带几乎不色散，网格数给 1 就够。`SCHEME MONKHORST-PACK 6 6 1` 对 (001) 表面是标准写法，白算的那些点纯属浪费。",
+            text: "周期性体系要留意偶极的定义。`MOMENTS` 的 `PERIODIC` 默认是 T，用 Berry 相位公式，适用于绝缘体；设成 F 时用简单偶极算符，手册明确只有**垂直于周期方向的分量**是良定义的。slab 的法向通常是真空，垂直分量正好可用；三维体相则要认真处理。",
           },
         ],
       },
       {
         id: "10.5",
-        title: "对称性约化：省一半算力，也带来两个坑",
+        title: "Raman：极化率的故事",
         blocks: [
           {
             type: "p",
-            text: "布里渊区有对称性，很多 k 点算出来的本征值其实是同一套。规则网格下 CP2K **默认**做 $\\mathbf{k} \\leftrightarrow -\\mathbf{k}$ 的时间反演约化，这不需要你设置。再往前一步是用**原子结构的空间群**约化，这由 `&KPOINTS` 里的 `SYMMETRY` 控制，默认关闭。",
+            text: "Raman 散射来自诱导偶极，强度取决于极化率对简正坐标的导数。IR 看偶极矩的一阶变化，Raman 看极化率的一阶变化，两套选择定则互补；一个模式可以在 IR 里很弱、在 Raman 里很强，反过来也一样。",
+          },
+          {
+            type: "p",
+            text: "CP2K 里 Raman 强度仍然由 `INTENSITIES T` 汇总，但极化率必须在 `&PROPERTIES/&LINRES/&POLAR` 里显式打开。少任何一个前置开关，强度都只会是空列。",
           },
           {
             type: "code",
             lang: "cp2k",
-            title: "打开原子对称约化并核对点集",
-            text: `&DFT
-  &KPOINTS
-    SCHEME MONKHORST-PACK 4 4 4
-    SYMMETRY T
-    WAVEFUNCTIONS COMPLEX
-    EPS_SYMMETRY 1.0E-6
-  &END KPOINTS
-  &PRINT
-    &KPOINTS
-      VERBOSE T
-    &END KPOINTS
-  &END PRINT
-&END DFT`,
+            title: "Raman 需要的极化率设置",
+            text: `&FORCE_EVAL
+  METHOD Quickstep
+  &PROPERTIES
+    &LINRES
+      &POLAR ON
+      &END POLAR
+    &END LINRES
+  &END PROPERTIES
+&END FORCE_EVAL`,
           },
           {
             type: "p",
-            text: "手册对这件事的措辞很谨慎：原子对称约化是 **experimental** 功能，必须拿 `FULL_GRID T` 的全网格结果做参考验证，确认能量和力一致才能用。`SYMMETRY T` 还要求 `WAVEFUNCTIONS COMPLEX`（k 点计算本来就是默认值，只有你手动改成 REAL 之后才需要加回来）。",
-          },
-          {
-            type: "p",
-            text: "第二个坑是 cell 的表示。完整原子约化要求 cell 满足标准下三角约定（A 沿 x 轴，B 在 xy 平面内）。如果你的 cell 是从实验文件里原样读进来的、没有转成这个约定，CP2K 会打警告并**退回只做时间反演**（`INVERSION_SYMMETRY_ONLY`）——计算结果没错，但你期待的加速没发生，而很多人不会去看那条警告。",
-          },
-          {
-            type: "compare",
-            left: {
-              title: "想省时间，用约化",
-              items: [
-                "`SYMMETRY T`：空间群 + 时间反演一起约化",
-                "`INVERSION_SYMMETRY_ONLY T`：只做时间反演，最保守",
-                "默认（不写）：时间反演自动生效",
-                "先跑 `FULL_GRID T` 存档，再对比能量与力",
-              ],
-            },
-            right: {
-              title: "想要可复现的严格结果",
-              items: [
-                "`SYMMETRY F` + `FULL_GRID T`：一点不省，全算",
-                "适合发表级数字、也适合当参考基准",
-                "GEO_OPT / CELL_OPT 中约化集每步会变",
-                "要保持空间群另开 `KEEP_SPACE_GROUP`",
-              ],
-            },
+            text: "线性响应要解耦合微扰方程，成本明显高于纯频率。实践顺序是：先确认频率与虚频，再开 IR；IR 正常后再开 Raman。把三步分开跑，出错时能立刻定位是几何、SCF 还是响应设置。",
           },
           {
             type: "callout",
-            kind: "danger",
-            title: "优化过程中 k 点集不再是常数",
-            text: "GEO_OPT、CELL_OPT、MD 每一步都会按当前几何重新做对称性分析，约化后的 k 点集可能在某一步突然变化。表现出来就是能量或力出现一个没有任何物理原因的小跳变，优化器随即震荡。要做严格的对称性保持优化，用 `&GEO_OPT KEEP_SPACE_GROUP T`（CELL_OPT 用 `KEEP_SYMMETRY`），或者干脆 `SYMMETRY F` 全程用同一套全网格。",
+            kind: "warn",
+            title: "强度不是判据",
+            text: "强度对基组、泛函、数值步长都敏感，绝对峰高很少能和实验逐点对上。用频率位置和模式归属做主要比较，强度只用来看相对强弱与哪些峰该出现。",
           },
         ],
       },
       {
         id: "10.6",
-        title: "自旋：UKS、多重度与初猜磁矩",
+        title: "热化学：ZPE、熵与吉布斯自由能",
         blocks: [
           {
             type: "p",
-            text: "默认的 Kohn–Sham 求解让每对电子共用一个轨道（闭壳层）。有未成对电子时，alpha 和 beta 要分开算，这就是 **UKS**（unrestricted Kohn–Sham，CP2K 里也写作 LSD）。打开方式只有一行 `UKS T`，代价是自由度翻倍、SCF 更难收敛。",
-          },
-          {
-            type: "p",
-            text: "`MULTIPLICITY` 是 $2S+1$：单重态 1、双重态 2、三重态 3。**不写它时** CP2K 按电子数奇偶给默认值——偶数电子当单重态、奇数电子当双重态，也就是默认闭壳层。所以「我打开了 UKS，为什么还是得到零磁矩」的答案通常是：多重度还停在默认值上。",
+            text: "有了频率就能算配分函数，进而得到零点能、内能、焓、熵和吉布斯自由能。CP2K 把这一套放在 `&VIBRATIONAL_ANALYSIS` 里，用 `THERMOCHEMISTRY T` 打开，用 `TC_TEMPERATURE` 与 `TC_PRESSURE` 给条件；没有独立的 `&THERMOCHEMISTRY` 节。",
           },
           {
             type: "code",
             lang: "cp2k",
-            title: "bcc Fe：自旋 + 展宽的完整输入",
-            text: `&GLOBAL
-  PROJECT fe
-  RUN_TYPE ENERGY
-&END GLOBAL
-&FORCE_EVAL
-  METHOD Quickstep
-  &DFT
-    BASIS_SET_FILE_NAME BASIS_MOLOPT
-    POTENTIAL_FILE_NAME GTH_POTENTIALS
-    UKS T
-    &SCF
-      EPS_SCF 1.0E-7
-      MAX_SCF 100
-      ADDED_MOS 20
-      &MIXING
-        METHOD BROYDEN_MIXING
-        ALPHA 0.3
-        ALPHA_MAG 0.8
-        NBUFFER 8
-      &END MIXING
-      &SMEAR ON
-        METHOD FERMI_DIRAC
-        ELECTRONIC_TEMPERATURE 500
-      &END SMEAR
-    &END SCF
-    &KPOINTS
-      SCHEME MONKHORST-PACK 8 8 8
-    &END KPOINTS
-    &XC
-      &XC_FUNCTIONAL PBE
-    &END XC_FUNCTIONAL
-    &END XC
-  &END DFT
-  &SUBSYS
-    &CELL
-      ABC 2.87 2.87 2.87
-    &END CELL
-    &COORD
-      SCALED T
-      Fe 0.00 0.00 0.00
-      Fe 0.50 0.50 0.50
-    &END COORD
-    &KIND Fe
-      BASIS_SET DZVP-MOLOPT-SR-GTH
-      POTENTIAL GTH-PBE-q16
-      MAGNETIZATION 2.0
-    &END KIND
-  &END SUBSYS
-&END FORCE_EVAL`,
+            title: "298.15 K、1 atm 的热化学",
+            text: `&VIBRATIONAL_ANALYSIS
+  DX 1.0E-2
+  THERMOCHEMISTRY T
+  TC_TEMPERATURE 298.15
+  TC_PRESSURE 1.01325E+5
+  &PRINT
+    &MOLDEN_VIB
+      FILENAME h2o_freq
+    &END MOLDEN_VIB
+  &END PRINT
+&END VIBRATIONAL_ANALYSIS`,
+          },
+          {
+            type: "formula",
+            tex: "E_{\\mathrm{ZPE}}=\\frac{1}{2}\\sum_i h\\nu_i",
           },
           {
             type: "p",
-            text: "`MAGNETIZATION` 在 `&KIND` 里，含义是**原子初猜**：给这个原子加 $m/2$ 个 alpha 电子、减掉同样多的 beta 电子。它不改变最终的物理，只决定 SCF 往哪个自旋解走——铁磁、反铁磁、非磁解常常是同一套输入的不同自洽解，落点由初猜决定。做反铁磁就把相邻两个 Fe 的初猜设成一正一负。",
-          },
-          {
-            type: "p",
-            text: "`ALPHA_MAG` 是磁化密度的混合系数，默认跟随 `ALPHA`。手册建议磁性过渡金属常用 0.8–1.6 这一档；太小收敛慢，太大则在两个解之间来回跳。看到磁矩在 0 和某个大数之间反复摆动，先把 `ALPHA_MAG` 降到 0.5 以下，而不是加步数。",
+            text: "零点能是所有振动模式 $h\\nu_i/2$ 的和；热修正再叠加每个模式的振动熵与平动/转动贡献。两个默认值要记住：`TC_TEMPERATURE` 默认 **273.15 K**（不是 298.15），`TC_PRESSURE` 默认 101325 Pa。要报标准态数据，就显式写 298.15。",
           },
           {
             type: "table",
-            head: ["关键字", "位置", "作用"],
+            head: ["输出量", "来自", "使用时的注意点"],
             rows: [
-              ["`UKS T`", "`&DFT`", "打开自旋极化，alpha/beta 分开求解"],
-              ["`MULTIPLICITY`", "`&DFT`", "$2S+1$；默认按电子数奇偶给 1 或 2"],
-              ["`CHARGE`", "`&DFT`", "体系总电荷；改它会同时改电子数与默认多重度"],
-              ["`MAGNETIZATION`", "`&KIND`", "单原子初猜磁矩，只影响收敛到哪个解"],
-              ["`ALPHA_MAG`", "`&SCF %MIXING`", "磁化密度的混合比例，磁性体系要单独调"],
-              ["`ROKS`", "`&DFT`", "限制性开壳层，省算力但只能描述一种固定形式"],
+              ["ZPE", "全部实频", "虚频存在时 ZPE 没有意义"],
+              ["内能 / 焓", "电子能 + ZPE + 热修正", "确认报告的是哪个参考态"],
+              ["熵", "平动、转动、振动配分函数", "低频模式贡献大，RRHO 容易高估"],
+              ["吉布斯自由能", "G = H − TS", "只适用于气相分子，别直接套到表面"],
             ],
           },
           {
-            type: "callout",
-            kind: "tip",
-            title: "先验证自旋态是你要的那个",
-            text: "算完别只看能量。在输出里找每个原子的 Mulliken 自旋布居（population analysis），确认磁矩确实落在你预期的原子上、符号也对。一个「收敛了」的反铁磁输入，很可能实际收敛到了非磁解，而能量差别足以改变你的结论。",
+            type: "p",
+            text: "手册写得很清楚：热化学基于刚性转子–谐振子（RRHO）模型，只适用于气相分子；柔性体系里非常低的振动频率会让 RRHO 失效。表面吸附、团簇、氢键网络都要另外处理低频与平动/转动，不能把气相公式硬套。",
           },
         ],
       },
       {
         id: "10.7",
-        title: "金属：smearing 与占据数",
+        title: "TRAVIS：把 Wannier 中心交给后处理",
         blocks: [
           {
             type: "p",
-            text: "绝缘体里每个能带要么全满要么全空，占据数是整数；金属里费米面穿过某些能带，占据数在 0 和 1 之间连续变化。如果还按整数占据去迭代，SCF 会在两个几乎简并的占据方案之间反复横跳，永远收敛不了。解法是把占据数按费米分布展宽，让它们变成光滑函数。",
+            text: "有限差分的 IR 强度只给静态谱峰；要算有限温度下的谱线形状，需要偶极矩的时间序列。TRAVIS 是 Martin Brehm 开发的 CP2K 轨迹分析工具，读取含 Wannier 中心的轨迹，用偶极自相关函数得到 IR，用极化率自相关得到 Raman。",
+          },
+          {
+            type: "p",
+            text: "第一步是在 AIMD 里每一步都做局域化并打印 Wannier 中心。`&LOCALIZE T` 打开局域化，`METHOD CRAZY` 是课程示例采用的局域化方法；`&PRINT/&WANNIER_CENTERS` 的 `IONS+CENTERS` 把原子和中心写进同一个 xyz。",
           },
           {
             type: "code",
             lang: "cp2k",
-            title: "Fermi–Dirac 展宽 + 空带",
-            text: `&SCF
-  ADDED_MOS 20
-  EPS_SCF 1.0E-6
-  MAX_SCF 100
-  &SMEAR ON
-    METHOD FERMI_DIRAC
-    ELECTRONIC_TEMPERATURE 300
-    EPS_FERMI_DIRAC 1.0E-10
-  &END SMEAR
-  &MIXING
-    METHOD BROYDEN_MIXING
-    ALPHA 0.3
-    NBUFFER 8
-  &END MIXING
-&END SCF`,
+            title: "AIMD 中输出 Wannier 中心轨迹",
+            text: `&FORCE_EVAL
+  METHOD Quickstep
+  &DFT
+    &LOCALIZE T
+      METHOD CRAZY
+    &END LOCALIZE
+    &PRINT
+      &WANNIER_CENTERS
+        IONS+CENTERS
+        FILENAME wannier.xyz
+        &EACH
+          MD 1
+        &END EACH
+      &END WANNIER_CENTERS
+    &END PRINT
+  &END DFT
+&END FORCE_EVAL`,
           },
           {
             type: "p",
-            text: "两个配套项不能忘：`&SMEAR ON` 打开展宽（这个节默认是关的，`SECTION_PARAMETERS` 是它真正的开关），`ADDED_MOS` 给出额外的空带——占据数要能在费米能级以上流动，就必须有地方可去。k 点计算里写成 `ADDED_MOS AUTO` 让 CP2K 自己决定。",
+            text: "轨迹准备好后，按官网说明编译 TRAVIS（g++/gfortran 加 make），在 `exe/` 下得到可执行文件。运行时它会逐项提问：盒子边长（pm）、要算的函数（`ir`）、帧间隔（fs）、偶极模式、ACF 深度、是否输出整体谱。",
           },
           {
-            type: "callout",
-            kind: "warn",
-            title: "开了 smearing 就不能再用 OT",
-            text: "OT 求的是**固定整数占据**下的极小值，而展宽改的正是占据数，两者放在一起是矛盾的。手册在 SCF 收敛那一页写得很含蓄：「有些算法只兼容均匀占据」——说的就是 OT。金属体系请走对角化路线：**把 `&OT` 整段删掉**，SCF 就默认走标准对角化（需要时可显式写一个空的 `&DIAGONALIZATION` 节），再配 `&SMEAR` 与 `&MIXING`。",
+            type: "code",
+            lang: "bash",
+            title: "用 Wannier 轨迹算 IR",
+            text: `travis -p wannier.xyz
+# 交互示例：782 / ir / 0.5 / 1 / 3115 / y
+ls ir_spectrum_global.csv ir_spectrum_H2O.csv`,
           },
           {
-            type: "table",
-            head: ["METHOD", "展宽形式", "用在哪"],
-            rows: [
-              ["`FERMI_DIRAC`", "物理的费米分布，宽度由温度定", "金属首选；温度越低越接近真实占据"],
-              ["`GAUSSIAN`", "高斯展宽，宽度 `SIGMA`", "平滑但需向 SIGMA→0 外推才能拿到 0 K 能量"],
-              ["`METHFESSEL_PAXTON`", "冷 smearing", "手册明确说不要用于半导体和绝缘体"],
-              ["`MARZARI_VANDERBILT`", "冷 smearing 变体", "同上，适合金属"],
-              ["`ENERGY_WINDOW` / `LIST`", "按能量窗或给定列表", "特殊用途，需要你对占据有明确控制"],
+            type: "steps",
+            items: [
+              { t: "确认轨迹", d: "xyz 里同时有原子和 X 中心，帧间隔与 MD 的 TIMESTEP 一致；中心数等于占据轨道数。" },
+              { t: "选分析", d: "一次只做一种分析；IR 选 ir，Raman 另起一轮，避免输入串味。" },
+              { t: "给时间步", d: "每 5 步保存一次、TIMESTEP 0.5 fs，则这里填 2.5 fs；填错会让峰位整体缩放。" },
+              { t: "定 ACF 深度", d: "深度越大频率分辨率越高，但不能超过总帧数；总时长不足时低频峰会被截断。" },
+              { t: "导出与记录", d: "结果写在当前目录的 CSV；把盒子、步长、ACF 深度和 travis 版本一起记进方法段。" },
             ],
           },
           {
-            type: "callout",
-            kind: "warn",
-            title: "力和应力对应的是自由能",
-            text: "手册特别提醒：开启 smearing 后，输出的**力与应力对应的是自由能**，不是向零展宽外推后的能量。所以做金属的 GEO_OPT 时，几何是在有限温度的自由能面上优化的；如果你报的是「0 K 能量」，两者之间还差一个熵项，别把不同展宽下的数字混在一张表里比较。",
-          },
-          {
             type: "p",
-            text: "展宽大小的经验做法：先取一个能让 SCF 稳定收敛的温度（金属常见 300–1000 K 这个量级），收敛后再降到更低的值复算。如果能量随展宽单调漂移、降不下去，说明 k 点还不够密——回到 10.4 节。展宽是收敛的**润滑剂**，不是精度的替代品。",
+            text: "TRAVIS 的交互答案可以用输入文件复用，适合批量与复现；结果文件默认不覆盖旧文件，重复运行会加 `#1#` 后缀。谱图导入 Origin 或 Python 画图时，横轴是波数、纵轴是强度，注意单位与是否做了归一化。",
           },
         ],
       },
       {
         id: "10.8",
-        title: "Γ 点什么时候真的够用",
+        title: "常见坑与交付检查",
         blocks: [
           {
-            type: "p",
-            text: "这是最常被问、也最容易答错的问题。判据不在体系「大小」，而在**你的盒子在三个方向上是否已经大到让能带不色散**。下面这张对照表可以直接当决策清单用。",
-          },
-          {
-            type: "compare",
-            left: {
-              title: "Γ 点通常够用",
-              items: [
-                "孤立分子放在足够大的盒子里（真空 ≥ 10 Å）",
-                "大超胞（几十到几百原子），能带已接近平带",
-                "绝缘体 / 宽带隙半导体，且你只要定性趋势",
-                "slab 的真空方向，nanowire 的两个横向",
-              ],
-            },
-            right: {
-              title: "Γ 点一定不够",
-              items: [
-                "金属、半金属：费米面处的占据必须采样",
-                "原胞级的小晶胞半导体：带边对 k 很敏感",
-                "要算带隙、有效质量、态密度",
-                "几何/晶胞优化：力对 k 点比能量更敏感",
-                "任何要发表的绝对能量与晶格常数",
-              ],
-            },
+            type: "table",
+            head: ["症状", "常见原因", "处理"],
+            rows: [
+              ["极小点出现一个明显虚频", "几何未优化到位，或盒子太小", "收紧 MAX_FORCE 重优化；加大真空；复算 DX"],
+              ["低频一片小虚频", "EPS_SCF 太松、网格噪声", "EPS_SCF 收到 1E-8；提高 CUTOFF；做 DX 敏感性"],
+              ["IR 强度全是 0", "没开 MOMENTS，或没设 INTENSITIES T", "补 `&DFT/&PRINT/&MOMENTS` 与 `INTENSITIES T`"],
+              ["Raman 没有强度", "没开 `&PROPERTIES/&LINRES/&POLAR`", "补极化率设置，再重跑响应"],
+              ["热化学报错或数值离谱", "有虚频，或体系不是气相分子", "先消虚频；表面/团簇改用别的自由能路线"],
+              ["TRAVIS 峰位整体偏移", "帧间隔填错，或盒子单位不是 pm", "核对 TIMESTEP×保存间隔；确认盒子单位"],
+            ],
           },
           {
             type: "steps",
             items: [
-              { t: "先只想清楚一件事", d: "你要报的是能量差、结构、还是电子结构量？能量差和结构对 k 点要求不同，别用错判据。" },
-              { t: "从 2×2×2 起扫", d: "固定 CUTOFF、基组、SCF 阈值，只改网格数，记录目标量。" },
-              { t: "看相邻档的差", d: "差值稳定小于你的目标精度就停；不够就继续加密，别跳档。" },
-              { t: "换性质再测一遍", d: "能量收敛了不代表力收敛。做优化的话，用力的差来定网格。" },
-              { t: "写进方法段", d: "把最终网格数、是否 GAMMA_CENTERED、是否开对称约化记下来，别人才能复现。" },
+              { t: "结构", d: "优化判据全部达标；记录泛函、基组、CUTOFF、k 点与色散设置。" },
+              { t: "纯频率", d: "先不开强度与热化学，确认虚频数目符合预期。" },
+              { t: "数值校验", d: "DX 改 2–5 倍复算目标模式；确认漂移小于声称精度。" },
+              { t: "强度", d: "先 IR 后 Raman；每一步都确认前置开关真的打开。" },
+              { t: "交付", d: "输入、Molden、频率表、热化学输出、TRAVIS 命令与版本一起归档。" },
             ],
           },
           {
             type: "keypoints",
             items: [
-              "省略 `&KPOINTS` 就是 Γ-only；它是对布里渊区积分的一种近似，不是「关掉周期性」",
-              "`MONKHORST-PACK` 给网格数、`MACDONALD` 加 shift、`GENERAL` 逐点写；`KPOINT` 的坐标单位由 `UNITS` 决定",
-              "k 点收敛要逐量测：能量快、力慢、金属占据最慢；smearing 不能代替采样",
-              "原子对称约化是 experimental，必须用 `FULL_GRID T` 全网格验证；优化中约化集每步会变",
-              "自旋要同时设 `UKS T`、`MULTIPLICITY`，必要时用 `&KIND MAGNETIZATION` 给初猜",
-              "金属必须 `&SMEAR ON` + `ADDED_MOS`，并且记住力与应力对应的是自由能",
+              "`&VIBRATIONAL_ANALYSIS` 是顶层节；`RUN_TYPE` 用 `VIBRATIONAL_ANALYSIS`",
+              "极小点 0 个虚频，过渡态 1 个；多个虚频先怀疑几何与 SCF",
+              "IR 要 `INTENSITIES T` + `MOMENTS`；Raman 再加 `LINRES/POLAR`",
+              "热化学是 RRHO，只对气相分子；默认温度 273.15 K",
+              "有限温度谱用 Wannier 中心轨迹 + TRAVIS，帧间隔必须与保存频率一致",
             ],
-          },
-          {
-            type: "callout",
-            kind: "tip",
-            title: "下一步",
-            text: "网格定下来之后，就可以把它带进几何优化了。下一章讲 GEO_OPT 与 CELL_OPT：优化器怎么选、四个收敛判据各自在管什么、以及为什么「收敛了」不等于「找到了极小点」。",
           },
         ],
       },
     ],
     quiz: [
       {
-        q: "一个周期性输入里完全没写 `&KPOINTS`，CP2K 实际在做的是？",
+        q: "频率计算里，`&VIBRATIONAL_ANALYSIS` 应该放在哪里？",
         options: [
-          "报错，周期性计算必须给 k 点",
-          "只算 Γ 点，即 k = 0 一个采样点",
-          "自动按晶胞长度生成 Monkhorst-Pack 网格",
-          "关掉周期性，退化成孤立分子计算",
-        ],
-        answer: 1,
-        explain: "省略 &KPOINTS 等价于 SCHEME GAMMA，只采 Γ 点。周期性（&CELL 的 PERIODIC）依然生效，只是布里渊区积分被一个点近似。",
-      },
-      {
-        q: "`SCHEME MONKHORST-PACK 4 4 4` 默认会包含 Γ 点吗？",
-        options: [
-          "会，Monkhorst-Pack 定义上总是含 Γ",
-          "不会，偶网格默认不含，需要 `GAMMA_CENTERED T`",
-          "取决于 `UNITS` 的设置",
-          "取决于是否打开 `SYMMETRY`",
-        ],
-        answer: 1,
-        explain: "偶数网格默认是偏移的、不含 Γ 点。想包含就显式写 GAMMA_CENTERED T。这也是对比收敛时最容易无意中改变的一个变量。",
-      },
-      {
-        q: "金属体系加了 `&SMEAR` 之后 SCF 收敛了，关于 k 点你可以得出什么结论？",
-        options: [
-          "smearing 已经补上了布里渊区积分误差，2×2×2 就够",
-          "仍需单独做 k 点收敛测试；smearing 只解决占据数跳变",
-          "smearing 会强制使用 Γ 点，所以不需要 k 点",
-          "只要 ELECTRONIC_TEMPERATURE 足够高，k 点可以取 1",
-        ],
-        answer: 1,
-        explain: "展宽让占据数变成光滑函数、帮助 SCF 收敛，但它不改变采样密度不足带来的积分误差。两者必须分开测，而且加大展宽只是把误差藏进自由能。",
-      },
-      {
-        q: "打开 `UKS T` 但没设 `MULTIPLICITY`，一个偶数电子的体系会怎样？",
-        options: [
-          "默认取三重态，因为 UKS 意味着有未成对电子",
-          "默认按电子数奇偶给值，偶数电子即单重态，结果可能仍是零磁矩",
-          "报错，UKS 必须显式给多重度",
-          "自动搜索所有自旋态并取能量最低者",
-        ],
-        answer: 1,
-        explain: "MULTIPLICITY 默认 0，CP2K 据此按电子数奇偶给 1 或 2。打开 UKS 不会自动改变多重度，所以常见现象是「开了自旋极化却没有磁矩」。",
-      },
-      {
-        q: "在 GEO_OPT 中打开 `SYMMETRY T` 做 k 点约化，最需要注意什么？",
-        options: [
-          "优化过程中约化后的 k 点集会随几何每步变化，可能引起能量/力的小跳变",
-          "打开后必须同时关闭 `&SMEAR`，否则报错",
-          "只能在 Γ 点计算里使用",
-          "它会把晶胞也一起优化",
+          "顶层，与 `&FORCE_EVAL`、`&MOTION` 平级",
+          "放进 `&MOTION` 里，作为它的子节",
+          "放进 `&DFT` 里，紧挨 `&SCF`",
+          "放进 `&SUBSYS` 里，紧挨 `&COORD`",
         ],
         answer: 0,
-        explain: "对称性每步按当前几何重算，约化集可能改变，导致不连续的跳变。要保持空间群用 KEEP_SPACE_GROUP，或干脆 SYMMETRY F 全程用同一套全网格；而且原子约化本身是 experimental，需用 FULL_GRID 参考验证。",
+        explain: "当前手册把 VIBRATIONAL_ANALYSIS 列为顶层输入节；配 RUN_TYPE VIBRATIONAL_ANALYSIS 使用。旧教程常写在 &MOTION 下，照抄前先核对版本。",
+      },
+      {
+        q: "一个本应是小极小的结构算出 1 个明显虚频，最合理的解释是？",
+        options: [
+          "程序把平动模式算成了虚频",
+          "结构是一阶鞍点，或优化/SCF 尚未收敛",
+          "虚频一定代表计算失败，必须换泛函",
+          "基组越大虚频越多，属于正常现象",
+        ],
+        answer: 1,
+        explain: "一个虚频对应一个负曲率方向：可能确实是过渡态，也可能是几何没优化到位或 SCF 太松。先用 MOLDEN_VIB 看模式方向，再收紧优化与 EPS_SCF 复算。",
+      },
+      {
+        q: "要得到 IR 强度，除了 `INTENSITIES T` 还需要打开什么？",
+        options: [
+          "`&PROPERTIES/&LINRES/&POLAR`",
+          "`&DFT/&PRINT/&MOMENTS`，让每个位移都有偶极矩",
+          "`&SMEAR ON`，让占据数连续",
+          "`FULLY_PERIODIC T`，去掉转动模式",
+        ],
+        answer: 1,
+        explain: "IR 强度来自偶极矩对简正坐标的导数，需要每个位移构型的偶极矩；Raman 才需要 LINRES/POLAR 的极化率。INTENSITIES 只是汇总开关。",
+      },
+      {
+        q: "`TC_TEMPERATURE` 不写时，CP2K 的默认热化学温度是？",
+        options: ["0 K", "273.15 K", "298.15 K", "300 K"],
+        answer: 1,
+        explain: "手册给的默认值是 273.15 K，不是常见的 298.15 K。要报标准态数据必须显式写 TC_TEMPERATURE 298.15。",
+      },
+      {
+        q: "用 TRAVIS 算有限温度 IR，轨迹里必须包含什么？",
+        options: [
+          "只含原子坐标的 xyz 即可",
+          "每帧的受力",
+          "Wannier 中心（IONS+CENTERS）",
+          "每个原子的电荷",
+        ],
+        answer: 2,
+        explain: "TRAVIS 用 Wannier 中心与原子坐标构造偶极时间序列，再做自相关；只有原子坐标无法得到偶极矩。CP2K 侧要开 LOCALIZE 并打印 WANNIER_CENTERS。",
       },
     ],
     terms: [
-      {
-        t: "布里渊区",
-        en: "Brillouin zone",
-        d: "倒空间里的原胞。所有 k 点相关的积分都在这个区域内做，CP2K 用有限加权网格近似它。",
-      },
-      {
-        t: "k 点",
-        en: "k-point",
-        d: "Bloch 波的倒空间标签。SCF 里每个 k 点是一套独立的电子本征问题，计算量随点数线性增长。",
-      },
-      {
-        t: "Monkhorst-Pack 网格",
-        en: "Monkhorst-Pack mesh",
-        d: "在三个倒格矢方向上均匀铺 n₁×n₂×n₃ 个采样点的方案，是 CP2K 里最常用的 &KPOINTS SCHEME。",
-      },
-      {
-        t: "时间反演对称",
-        en: "time-reversal symmetry",
-        d: "k 与 −k 的本征值相同，因此规则网格默认只算一半。它独立于原子结构的空间群约化。",
-      },
-      {
-        t: "自旋极化 / UKS",
-        en: "unrestricted Kohn-Sham (UKS/LSD)",
-        d: "alpha 与 beta 电子用不同轨道求解，能描述磁矩。代价是自由度翻倍、SCF 更难收敛。",
-      },
-      {
-        t: "多重度",
-        en: "multiplicity",
-        d: "2S+1，标明体系的总自旋。默认按电子数奇偶取 1 或 2，改自旋态必须显式设置。",
-      },
-      {
-        t: "smearing / 电子温度",
-        en: "smearing / electronic temperature",
-        d: "按费米分布把占据数展宽成光滑函数，让金属的 SCF 能收敛。它不替代 k 点收敛测试。",
-      },
-      {
-        t: "费米面",
-        en: "Fermi surface",
-        d: "占据与空态的分界。金属的占据数在这里跳变，是 k 点积分收敛慢的根源。",
-      },
+      { t: "Hessian", en: "Hessian matrix", d: "能量对原子坐标的二阶偏导矩阵；对角化后给出简正模式与频率。" },
+      { t: "虚频", en: "imaginary frequency", d: "Hessian 负本征值对应的频率，表示该方向是能量极大；一个虚频通常是一阶鞍点。" },
+      { t: "零点能", en: "zero-point energy", d: "所有振动模式 hν/2 之和，即使在 0 K 也存在。" },
+      { t: "RRHO", en: "rigid-rotor harmonic oscillator", d: "刚性转子–谐振子近似；热化学的标准模型，低频模式与柔性体系下会失效。" },
+      { t: "偶极导数", en: "dipole derivative", d: "偶极矩对简正坐标的导数；平方正比于 IR 强度。" },
+      { t: "Wannier 中心", en: "Wannier center", d: "局域化轨道的中心位置；与原子坐标一起构造偶极矩时间序列，供 TRAVIS 做 IR。" },
+      { t: "自相关函数", en: "autocorrelation function", d: "TRAVIS 用偶极或极化率的时间自相关，经傅里叶变换得到谱线形状。" },
     ],
     sources: [
-      {
-        t: "k-Points",
-        url: "https://manual.cp2k.org/trunk/methods/dft/k-points.html",
-      },
-      {
-        t: "Band structure and GW",
-        url: "https://manual.cp2k.org/trunk/methods/electronic_structure/band/index.html",
-      },
-      {
-        t: "CP2K_INPUT / FORCE_EVAL / DFT / KPOINTS",
-        url: "https://manual.cp2k.org/trunk/CP2K_INPUT/FORCE_EVAL/DFT/KPOINTS.html",
-      },
-      {
-        t: "CP2K_INPUT / FORCE_EVAL / DFT / SCF / SMEAR",
-        url: "https://manual.cp2k.org/trunk/CP2K_INPUT/FORCE_EVAL/DFT/SCF/SMEAR.html",
-      },
+      { t: "CP2K_INPUT / VIBRATIONAL_ANALYSIS", url: "https://manual.cp2k.org/trunk/CP2K_INPUT/VIBRATIONAL_ANALYSIS.html" },
+      { t: "Methods / Infrared Spectroscopy", url: "https://manual.cp2k.org/trunk/methods/properties/infrared.html" },
+      { t: "Methods / Raman Spectroscopy", url: "https://manual.cp2k.org/trunk/methods/properties/raman.html" },
+      { t: "CP2K_INPUT / FORCE_EVAL / DFT / PRINT / MOMENTS", url: "https://manual.cp2k.org/trunk/CP2K_INPUT/FORCE_EVAL/DFT/PRINT/MOMENTS.html" },
+      { t: "CP2K_INPUT / DFT / LOCALIZE / PRINT / WANNIER_CENTERS", url: "https://manual.cp2k.org/trunk/CP2K_INPUT/FORCE_EVAL/DFT/LOCALIZE/PRINT/WANNIER_CENTERS.html" },
     ],
   };
 })();
