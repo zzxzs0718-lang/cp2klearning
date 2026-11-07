@@ -812,3 +812,16 @@ kbd, .kbd {
 
 .toolbar select { min-width: 0; max-width: 100%; }
 @media (max-width: 720px){ .toolbar { flex-wrap: wrap; } .toolbar select, .toolbar input { flex: 1 1 100%; } }
+
+/* mobile: keep wide data tables inside the viewport */
+@media (max-width: 720px) {
+  .tbl { table-layout: fixed; width: 100%; font-size: 12.5px; }
+  .tbl th, .tbl td { padding: 8px 8px; word-break: break-word; overflow-wrap: anywhere; }
+}
+
+
+/* inline code may contain long CP2K tokens: let it break instead of pushing the page wide */
+.sec p code, .sec li code, .sec td code, .sec th code { overflow-wrap: anywhere; word-break: break-word; }
+
+.sec p code, .sec li code, .sec td code, .sec th code { white-space: normal; }
+
