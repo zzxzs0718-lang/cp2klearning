@@ -698,7 +698,7 @@
     },
     {
       f: "opt-energy.txt", t: "几何优化能量序列：opt-energy.txt（6 KB）",
-      d: "GEO_OPT 每一步的能量，两列。用来画收敛曲线、判断 BFGS 是否在最后几步还在明显下降；比在 out 文件里数 `GEOMETRY OPTIMIZATION COMPLETED` 省事。",
+      d: "GEO_OPT 每一步的能量，一行一步，形如 `i = 3, E = -3102.0176`。用来画收敛曲线、判断 BFGS 是否在最后几步还在明显下降；比在 out 文件里数 `GEOMETRY OPTIMIZATION COMPLETED` 省事。",
     },
     {
       f: "rdf-auo.dat", t: "Au–O 径向分布：rdf-auo.dat（12 KB）",
