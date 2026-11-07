@@ -740,16 +740,26 @@
 
   /* ---------------- 搜索 ---------------- */
   let searchIndex = null;
+  function blockText(blocks) {
+    const out = [];
+    const skip = { type: 1, kind: 1, lang: 1, id: 1 };
+    (function walk(v, key) {
+      if (typeof v === "string") { if (!skip[key]) out.push(v); return; }
+      if (Array.isArray(v)) { v.forEach((x) => walk(x)); return; }
+      if (v && typeof v === "object") Object.keys(v).forEach((k) => walk(v[k], k));
+    })(blocks);
+    return out.join(" ");
+  }
   function buildSearchIndex() {
     const idx = [];
     CHAPTERS.forEach((c) => {
       idx.push({ g: "章节", t: c.title, d: c.subtitle || "", u: "#/" + c.id });
-      (c.sections || []).forEach((s) => idx.push({ g: "小节", t: s.id + " " + s.title, d: c.title, u: "#/" + c.id + "/" + s.id.replace(/\./g, "-") }));
+      (c.sections || []).forEach((s) => idx.push({ g: "小节", t: s.id + " " + s.title, d: c.title, u: "#/" + c.id + "/" + s.id.replace(/\./g, "-"), body: blockText(s.blocks) }));
       (c.terms || []).forEach((t) => idx.push({ g: "术语", t: t.t, d: t.d, u: "#/glossary" }));
     });
     (state.manual || []).forEach((m) => idx.push({ g: "手册", t: m.title, d: m.doc, u: "https://manual.cp2k.org/trunk/" + m.doc + ".html", ext: true }));
     if (state.keywords) (state.keywords).forEach((k) => idx.push({ g: "关键词", t: k.name, d: k.path + " · " + (k.desc || ""), u: "#/reference?q=" + encodeURIComponent(k.name) }));
-    idx.forEach((x) => { x.hay = (x.t + " " + (x.d || "")).toLowerCase(); x.tl = x.t.toLowerCase(); });
+    idx.forEach((x) => { x.hay = (x.t + " " + (x.d || "") + " " + (x.body || "")).toLowerCase(); x.tl = x.t.toLowerCase(); });
     searchIndex = idx;
     return idx;
   }
