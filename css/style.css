@@ -825,3 +825,26 @@ kbd, .kbd {
 
 .sec p code, .sec li code, .sec td code, .sec th code { white-space: normal; }
 
+
+/* appendix F: scripts & samples */
+.sec-h { font-size: 22px; margin: 30px 0 12px; letter-spacing: -.01em; }
+.script-list { display: grid; gap: 14px; }
+.script-card {
+  background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
+  padding: 18px 20px; box-shadow: var(--shadow-sm);
+}
+.script-card h3 { font-size: 16.5px; margin: 0 0 6px; }
+.script-card > p { color: var(--ink-2); font-size: 14.5px; line-height: 1.75; margin: 0 0 10px; }
+.script-card .code { margin: 10px 0 8px; }
+.script-note { font-size: 13.5px !important; color: var(--ink-3) !important; border-left: 2px solid var(--line-2); padding-left: 10px; }
+.script-foot { display: flex; justify-content: space-between; align-items: center; gap: 10px; font-size: 13px; color: var(--ink-3); margin: 8px 0 0 !important; }
+.dl-link { color: var(--teal); text-decoration: none; font-weight: 600; white-space: nowrap; }
+.dl-link:hover { text-decoration: underline; }
+.script-card { min-width: 0; }
+.script-card .code { max-width: 100%; overflow-x: auto; }
+.script-card .code pre { max-width: 100%; }
+@media (max-width: 720px) {
+  .script-list { grid-template-columns: 1fr; }
+  .script-card { padding: 14px 15px; }
+  .script-card .code { font-size: 12px; }
+}

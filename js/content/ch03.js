@@ -249,6 +249,46 @@ spack build-env cp2k@2023.2 -- bash`,
             ],
             caption: "路线没有优劣，只有「你的集群支持哪一种」。先问管理员，再动手。",
           },
+          { type: "h3", text: "自己编依赖：先装库，再装 CP2K" },
+          {
+            type: "p",
+            text: "课程资料包里留了一份 Intel 全家桶的完整编译记录（CP2K 7.1 + ELPA + libint + libxc + libxsmm）。它的顺序值得照抄：**先确定 MPI 与编译器，再装数学库与 FFTW，最后按 libxc → libint → ELPA → libxsmm 的顺序装可选库**。原因很实际：libint 要链接 libxc 的接口，ELPA 要链接 ScaLAPACK，libxsmm 只依赖编译器；顺序反了，后面每一步都要回头重编前面的库。",
+          },
+          {
+            type: "code",
+            lang: "bash",
+            title: "四个可选库的最小安装命令（Intel MPI，前缀自定）",
+            text: `export PREFIX=$HOME/cp2k-deps
+# 1) libxc：泛函库，几乎所有计算都要
+tar -zxf libxc-4.3.4.tar.gz && cd libxc-4.3.4
+./configure --prefix=$PREFIX FC=mpiifort F90=mpiifort CC=mpiicc CXX=mpiicpc \\
+            FCFLAGS="-O3 -xHost" CFLAGS="-O3 -xHost"
+make -j 8 && make install && cd ..
+
+# 2) libint：杂化泛函/HF 才需要；lmax-5 对应 f 极化
+tar -zxf libint-v2.6.0-cp2k-lmax-5.tgz && cd libint-v2.6.0-cp2k-lmax-5
+mkdir build && cd build
+FC=ifort CC=icc CXX=icpc cmake .. -DCMAKE_INSTALL_PREFIX=$PREFIX -DENABLE_FORTRAN=ON
+make -j 8 && make install && cd ../..
+
+# 3) ELPA：大体系杂化泛函的并行本征求解
+tar -zxf elpa-2020.05.001.rc1.tar.gz && cd elpa-2020.05.001.rc1
+./configure --prefix=$PREFIX FC=mpiifort CC=mpiicc CXX=mpiicpc \\
+  FCFLAGS="-O3 -xHost" CFLAGS="-O3 -xHost" CXXFLAGS="-O3 -xHost" \\
+  --with-avx-optimization \\
+  SCALAPACK_LDFLAGS="-L$MKLROOT/lib/intel64 -lmkl_scalapack_lp64 -lmkl_intel_lp64 -lmkl_core -lmkl_blacs_intelmpi_lp64"
+make -j 8 && make install && cd ..
+
+# 4) libxsmm：小矩阵乘，OT 与格点运算的加速项
+unzip libxsmm-master.zip && cd libxsmm-master
+make FC=ifort CXX=icpc CC=icc PREFIX=$PREFIX install && cd ..`,
+          },
+          {
+            type: "callout",
+            kind: "warn",
+            title: "换 MPI 就要全部重编",
+            text: "这些库把 MPI 的 ABI 编进了自己的二进制。换一套 MPI（Intel MPI ↔ OpenMPI ↔ MPICH）、甚至换大版本，都必须把 libxc/libint/ELPA 与 CP2K 一起重编；只重编 CP2K 会在链接或运行时报 `undefined symbol` / `MPI_Init` 段错误。同理，运行时的 `LD_LIBRARY_PATH` 必须指向编译时那套库。",
+          },
         ],
       },
       {

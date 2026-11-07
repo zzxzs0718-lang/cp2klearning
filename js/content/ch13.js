@@ -140,6 +140,24 @@ gmx msd -f au_h2o.gro -s au_h2o.tpr -n index.ndx \\
 # 只统计面内扩散时先投影到 xy：用 trjconv 去掉 z 向涨落再算
 # 拟合区间由 -beginfit/-endfit（单位 ps）控制，先用默认值看曲线形状再调`
           },
+          {
+            type: "p",
+            text: "CP2K 的 AIMD 通常只有几到几十 ps，而 GROMACS 的 `-trestart` 默认是 10 ps：照默认值跑，整条轨迹只算成一段，误差棒大得没法用。**帧间隔是多少 ps，`-trestart` 就填多少**（0.5 fs = 0.0005 ps）。另一个必加的是 `-rmcomm`：CP2K 不自动移除质心平动，不去掉的话 MSD 里混进一个 t² 项，拟合出来的 D 偏大。",
+          },
+          {
+            type: "code",
+            lang: "bash",
+            title: "短轨迹的正确参数",
+            text: `# 每 5 步存一帧、TIMESTEP 0.5 fs -> 帧间隔 2.5 fs = 0.0025 ps
+gmx msd -f au_h2o.gro -s au_h2o.tpr -n index.ndx \\
+        -sel "resname SOL" -mol \\
+        -trestart 0.0025 -rmcomm \\
+        -beginfit 2 -endfit 6 -o msd.xvg
+
+# -trestart = 每次重新计原点的间隔（ps），要等于帧间隔
+# -rmcomm    = 每帧先移除质心平动，去掉整体漂移
+# -beginfit/-endfit = 线性拟合窗口（ps），落在 MSD 的线性段`,
+          },
           { type: "p", text: "CP2K 自己也能出 MSD：`&MOTION/&MD` 下的 `&REFTRAJ` 段可以做参考轨迹分析，其 `&MSD` 子段支持用 `DEFINE_REGION` 限定统计区域——这一条对 slab 上的水很有用，因为你不希望把真空层和固定层也算进去。具体子关键词随版本有差异，按手册页 `CP2K_INPUT/MOTION/MD/REFTRAJ/MSD` 填；日常更省事的做法仍是转 gro 交给 GROMACS，或者用 TRAVIS 的 msd 功能。" },
           { type: "callout", kind: "warn", title: "扩散系数对时间步长和恒温器敏感", text: "同一个体系换恒温器（Nose 与 CSVR）或换时间步，D 可以差百分之几到十几。报数时把温度、恒温器类型、拟合区间、统计的分子数一起写出来；只写一个 D 值，别人无法复现也无法判断可信度。" }
         ]
@@ -184,6 +202,31 @@ python ./cube.py cp2k-cube-ELECTRON_DENSITY-1_0.cube
 #   1) 先导入 cp2k-cube-ELECTRON_DENSITY-1_0.cube（提供格点与晶胞）
 #   2) 再导入另外两个片段 cube，用 Edit -> Edit Data -> Subtract 做减法
 #   3) 等值面数值按体系大小调，一般从 ±0.002 e/Bohr^3 起试`
+          },
+          {
+            type: "p",
+            text: "不想在图形界面里手工相减，可以走 CP2K 自带的 `cubecruncher`：它读 cube、做加减、按几何中心对齐，一条命令出结果，适合把差分步骤写进脚本、保证每次都用同一套参数。课程的综合练习（TiO₂ 表面吸附乙酸）就是这么做的。",
+          },
+          {
+            type: "code", lang: "bash", title: "cubecruncher：命令行做片段差分",
+            text: `# 1) 编译（源码在 CP2K 的 tools/cubecruncher 下）
+cp -r $CP2K/tools/cubecruncher .
+cd cubecruncher && make && cd ..
+
+# 2) 差分：复合体系 - 染料分子 - 表面
+cubecruncher.x -i MODE1-ELECTRON_DENSITY-1_0.cube \\
+              -subtract MODE1_dye-ELECTRON_DENSITY-1_0.cube -o tmp.cube
+cubecruncher.x -i tmp.cube \\
+              -subtract MODE1_slab-ELECTRON_DENSITY-1_0.cube \\
+              -center geo -o MODE1_delta.cube
+
+# 3) 直接在 VMD 里显示 MODE1_delta.cube 的等值面`,
+          },
+          {
+            type: "callout",
+            kind: "tip",
+            title: "对齐比相减更重要",
+            text: "`-center geo` 会把两次计算的格点按几何中心对齐。如果三个片段的原子在盒子里位置不同（比如从复合体系里直接删原子、却重新居中了），格点就会错位，差出来的「密度」其实是平移误差。做法是：片段不重新居中，盒子与复合体系完全相同，只删原子。",
           },
           { type: "callout", kind: "warn", title: "差分图里混进基组误差的三种情况", text: "三次单点用了不同的盒子（片段单独算时缩小了 cell）、不同的 CUTOFF、或者片段没做鬼原子补偿——这三种都会让「差分」里混进基组重叠误差，看起来像电荷转移，其实只是基函数变了。做法是把三个计算的 cell 设成同一个（哪怕片段周围是空的），参数逐行一致，只在原子列表上做删减。" },
           { type: "callout", kind: "tip", title: "等值面的正负要成对看", text: "差分密度有正有负：正值表示该区域电子聚集，负值表示电子减少。只画一个符号的等值面，等于只看了一半故事。VESTA 里给正负分别设颜色（讲义常用红/蓝），并在图注里写清「红 = 增加，蓝 = 减少」。" }

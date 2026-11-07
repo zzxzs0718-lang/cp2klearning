@@ -201,7 +201,8 @@
       '<a class="side-link" data-page="map" href="#/map"><span class="n">B</span><span>手册地图</span></a>' +
       '<a class="side-link" data-page="units" href="#/units"><span class="n">C</span><span>单位与常数</span></a>' +
       '<a class="side-link" data-page="glossary" href="#/glossary"><span class="n">D</span><span>术语表</span></a>' +
-      '<a class="side-link" data-page="tools" href="#/tools"><span class="n">E</span><span>工具箱</span></a></div>';
+      '<a class="side-link" data-page="tools" href="#/tools"><span class="n">E</span><span>工具箱</span></a>' +
+      '<a class="side-link" data-page="scripts" href="#/scripts"><span class="n">F</span><span>脚本与样本</span></a></div>';
     const total = CHAPTERS.length || 21;
     const done = countDone();
     html += '<div class="side-progress"><div class="sp-top"><span>学习进度</span><span>' + done + " / " + total + '</span></div>' +
@@ -656,6 +657,79 @@
     return h;
   }
 
+  const SCRIPTS = [
+    {
+      f: "cp2k2gro.py",
+      t: "轨迹转 GROMACS：cp2k2gro.py",
+      d: "把 cp2k-pos-1.xyz（可选速度 cp2k-vel-1.xyz、晶胞 cp2k-1.cell）转成 .gro，并顺手生成最小可用的 .mdp/.top。转换本身只做格式与单位换算（Å → nm），不做任何物理修正。",
+      c: "python cp2k2gro.py -x cp2k-pos-1.xyz -c cp2k-1.cell -f traj.gro -a",
+      n: "NVT 轨迹没有 cell 文件时，自己写一个三行的 CELL（A B C / α β γ），否则脚本会提示缺少晶格信息。-a 生成的 mdp/top 只够让 grompp 认出原子和质量，不能拿来直接跑 MD。",
+      a: "许楠 / CP2K_scripts",
+    },
+    {
+      f: "zdistr.py",
+      t: "界面距离随时间：zdistr.py",
+      d: "从扩展 XYZ 轨迹里，把某一元素所有原子的 z 坐标（或到参考原子的距离）按帧抽出来，写成 distance-<元素>.xyz，用来画水层/吸附层沿法向的分布随时间的变化。",
+      c: "python zdistr.py cp2k-pos-1.xyz O",
+      n: "脚本按「原子数 + 2」推断帧长，只认标准扩展 XYZ；注释行里不要塞多余空行，否则帧会错位。",
+      a: "Jin-Cheng Liu",
+    },
+    {
+      f: "masscenter-TiO2.py",
+      t: "团簇漂移检查：masscenter-TiO2.py",
+      d: "逐帧计算 Au 原子相对 TiO2 质心的位移，输出时间序列。判断金属团簇在 AIMD 里有没有整体跑掉，比肉眼看轨迹可靠。",
+      c: "python masscenter-TiO2.py cp2k-pos-1.xyz Au",
+      n: "脚本里元素名与原子数按 Au/TiO2 写死，换体系要改第 2、3 个参数与 `if tmpl[0] == 'Au'` 这一行。",
+      a: "Jin-Cheng Liu",
+    },
+    {
+      f: "gaussian.py",
+      t: "HILLS 累加成自由能面：gaussian.py",
+      d: "读取 cp2k-HILLS.metadynLog（或 VASP 的 HILLSPOT），把每一帧加进去的高斯按网格累加，得到 1D 或 2D 自由能面。CP2K 只支持 1D；2D 用于 VASP 的 COLVAR。",
+      c: "python gaussian.py 1 1.0 3.0\n# 2D（VASP）：python gaussian.py 2 1.0 3.0 0.5 2.5",
+      n: "横轴范围要覆盖整个采样区间，否则边缘的高斯被截断、自由能面出现假势垒。图只反映已采样区域，未采样的谷不是「不存在」。",
+      a: "Jin-Cheng Liu",
+    },
+  ];
+  const SAMPLES = [
+    {
+      f: "cuh2o-ot.out", t: "真实 OT 输出：cuh2o-ot.out（56 KB）",
+      d: "Cu(100)/水 用 OT 跑的单点输出。适合练三件事：在长输出里定位 `SCF run converged`、读 `ENERGY|` 与 `Total energy`、确认 `PROGRAM ENDED AT`。也保留了完整的 timing 段，可以对照 19 章的并行分析。",
+    },
+    {
+      f: "opt-energy.txt", t: "几何优化能量序列：opt-energy.txt（6 KB）",
+      d: "GEO_OPT 每一步的能量，两列。用来画收敛曲线、判断 BFGS 是否在最后几步还在明显下降；比在 out 文件里数 `GEOMETRY OPTIMIZATION COMPLETED` 省事。",
+    },
+    {
+      f: "rdf-auo.dat", t: "Au–O 径向分布：rdf-auo.dat（12 KB）",
+      d: "从 Au(111)/水 AIMD 算出的 g(Au–O)，两列（r/Å、g）。第一峰位置对应金表面第一水层，峰高与积分给配位数。可以和 13.3 的 TRAVIS 路线对照。",
+    },
+    {
+      f: "hills-sample.log", t: "元动力学 HILLS：hills-sample.log（105 KB）",
+      d: "cp2k-HILLS.metadynLog 原文件。每行一个高斯：时间、位置、宽度、高度。gaussian.py 直接读它；也可以自己用 numpy 累加，验证对方法的理解。",
+    },
+  ];
+  function scriptsHTML() {
+    let h = pageHead("脚本与样本",
+      "课程包里真正用得上的四个脚本、四份真实输出，原样打包进站点——下载即用，离线可跑。");
+    h += '<div class="callout note"><div class="callout-t">出处与许可</div><div class="callout-b"><p>脚本来自「庚子计算 CP2K 课程」及其配套仓库（cp2k2gro.py 作者许楠，其余为 Jin-Cheng Liu），输出样本来自课程练习目录。这里只做整理与说明，版权归原作者；用于教学时请保留文件头注释。脚本按原样提供，运行前先读一遍参数与硬编码路径。</p></div></div>';
+    h += '<h2 class="sec-h">四个脚本</h2><div class="script-list">';
+    SCRIPTS.forEach((s) => {
+      h += '<div class="script-card"><h3>' + esc(s.t) + "</h3><p>" + esc(s.d) + "</p>" +
+        '<div class="code"><div class="code-head"><span class="lang">bash</span><span class="spacer"></span></div><pre><code>' + esc(s.c) + "</code></pre></div>" +
+        '<p class="script-note">' + esc(s.n) + "</p>" +
+        '<p class="script-foot"><span>' + esc(s.a) + '</span><a class="dl-link" href="assets/scripts/' + esc(s.f) + '" download>下载 ' + esc(s.f) + " ↓</a></p></div>";
+    });
+    h += '</div><h2 class="sec-h">四份真实输出</h2><div class="script-list">';
+    SAMPLES.forEach((s) => {
+      h += '<div class="script-card"><h3>' + esc(s.t) + "</h3><p>" + esc(s.d) + "</p>" +
+        '<p class="script-foot"><span>课程练习原始输出</span><a class="dl-link" href="assets/data/' + esc(s.f) + '" download>下载 ' + esc(s.f) + " ↓</a></p></div>";
+    });
+    h += "</div>";
+    h += '<div class="callout tip"><div class="callout-t">怎么用这些文件练手</div><div class="callout-b"><p>不要只看：把 <code>cuh2o-ot.out</code> 丢进 <code>grep -n "SCF run converged\|ENERGY|\|PROGRAM ENDED"</code>，看自己几秒能定位；用 <code>opt-energy.txt</code> 画收敛曲线，判断该不该继续；用 <code>gaussian.py</code> 重建自由能面，再改横轴范围看边缘效应。能复现，才算学会。</p></div></div>';
+    return h;
+  }
+
   function demoPage(id) {
     const t = TOOLS.find((x) => x.id === id);
     if (!t) return pageHead("找不到这个工具", "地址里的工具名不对。") + '<p><a href="#/tools">回到工具箱</a></p>';
@@ -782,6 +856,9 @@
       view.innerHTML = glossaryHTML();
       document.title = "术语表 · CP2K 学习手册";
       initGlossary();
+    } else if (r.path === "scripts") {
+      view.innerHTML = scriptsHTML();
+      document.title = "脚本与样本 · CP2K 学习手册";
     } else if (r.path === "tools") {
       view.innerHTML = r.anchor ? demoPage(r.anchor) : toolsHTML();
       document.title = (r.anchor ? (TOOLS.find((t) => t.id === r.anchor) || {}).t || "工具箱" : "工具箱") + " · CP2K 学习手册";

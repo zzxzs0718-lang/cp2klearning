@@ -365,6 +365,35 @@ ls ir_spectrum_global.csv ir_spectrum_H2O.csv`,
             type: "p",
             text: "TRAVIS 的交互答案可以用输入文件复用，适合批量与复现；结果文件默认不覆盖旧文件，重复运行会加 `#1#` 后缀。谱图导入 Origin 或 Python 画图时，横轴是波数、纵轴是强度，注意单位与是否做了归一化。",
           },
+          {
+            type: "p",
+            text: "批量跑多个温度点或多种体系时，不必每次重答一遍问题：第一次交互结束后，答案已写在当前目录的 `input.txt`；加 `-i input.txt` 就能复用同一套参数，把命令塞进循环即可。这样每个目录的结果参数完全一致，方法段也好写。",
+          },
+          {
+            type: "code",
+            lang: "bash",
+            title: "复用 input.txt，批量出谱",
+            text: `# 先在 300 K 的目录里交互跑一次，生成 input.txt，确认谱形合理
+cd 300K && travis -p wannier.xyz
+# 完成一次问答后，input.txt 就是这套参数的记录
+
+# 其他温度点：复制同一份答案，只改目录与轨迹
+for d in 350K 400K 450K; do
+  cd $d
+  travis -p wannier.xyz -i ../300K/input.txt
+  cd ..
+done
+
+# 输出：ir_spectrum_global.csv（整体谱）、ir_spectrum_<mol>.csv（分分子）
+#       *.agr（xmgrace）、*.plt（gnuplot）、vibrational_density.cube（可选）
+# 每次运行的完整问答与版本记在 travis.log`,
+          },
+          {
+            type: "callout",
+            kind: "tip",
+            title: "先在一个目录调好参数，再批量",
+            text: "ACF 深度和帧间隔决定了频率分辨率与峰位，抄错一个数，整批谱都会偏。做法是先在单目录里把 `input.txt` 调到与实验峰位对得上，再原样复制到其他目录；同时保留每个目录的 `travis.log`，出问题能回溯到具体参数。",
+          },
         ],
       },
       {
