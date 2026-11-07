@@ -11,6 +11,7 @@
   const ESC_MAP = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ESC_MAP[c]);
   const clamp = (n, a, b) => Math.max(a, Math.min(b, n));
+  const BUILD = "20261108";
   const CHAPTERS = Object.values(window.CONTENT || {}).sort((a, b) => a.num - b.num);
   const PARTS = ["起步", "输入与体系", "电子结构", "结构与振动", "动力学与自由能", "分析与实战"];
   const store = {
@@ -816,7 +817,7 @@
   function loadScript(src, cb) {
     if (document.querySelector('script[data-src="' + src + '"]')) return cb && cb();
     const s = document.createElement("script");
-    s.src = src;
+    s.src = src + (src.indexOf("?") >= 0 ? "&" : "?") + "v=" + BUILD;
     s.dataset.src = src;
     s.onload = () => cb && cb();
     s.onerror = () => cb && cb();
