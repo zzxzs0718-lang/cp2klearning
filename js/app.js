@@ -11,7 +11,7 @@
   const ESC_MAP = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ESC_MAP[c]);
   const clamp = (n, a, b) => Math.max(a, Math.min(b, n));
-  const BUILD = "20261114";
+  const BUILD = "20261115";
   const CHAPTERS = Object.values(window.CONTENT || {}).sort((a, b) => a.num - b.num);
   const PARTS = ["起步", "输入与体系", "电子结构", "结构与振动", "动力学与自由能", "分析与实战"];
   const store = {
@@ -201,7 +201,7 @@
   const FOLDER_ICON = '<svg class="fi" viewBox="0 0 20 20" aria-hidden="true"><path d="M2.5 5.5A1.5 1.5 0 0 1 4 4h4l1.6 2H16a1.5 1.5 0 0 1 1.5 1.5v7A1.5 1.5 0 0 1 16 16H4a1.5 1.5 0 0 1-1.5-1.5z" fill="currentColor"/></svg>';
 
   function folderForRoute(r) {
-    if (!r.path) return "start";
+    if (!r.path || r.path === "board") return "start";
     if (CHAPTER_BY_ID.has(r.path)) return CHAPTER_BY_ID.get(r.path).part;
     return "appendix";
   }
@@ -209,7 +209,7 @@
   function renderSidebar() {
     let h = '<div class="side-brand"><span class="mark">CP</span><span><b>CP2K 学习手册</b><small>本地笔记本 · 离线可用</small></span></div>';
     h += '<div class="side-label">笔记本</div><div class="side-group">';
-    h += '<button class="folder" data-folder="start" type="button">' + FOLDER_ICON + '<span class="fname">学习路线</span><span class="fcount">1</span></button></div>';
+    h += '<button class="folder" data-folder="start" type="button">' + FOLDER_ICON + '<span class="fname">学习路线</span><span class="fcount">2</span></button></div>';
     h += '<div class="side-label">课程</div><div class="side-group">';
     PART_GROUPS.forEach((g) => {
       h += '<button class="folder" data-folder="' + esc(g.p) + '" type="button">' + FOLDER_ICON +
@@ -241,7 +241,8 @@
     const f = state.folder;
     let title = "学习路线", rows = "";
     if (f === "start") {
-      rows = noteRow({ title: "学习路线 · 开始使用", href: "#/", on: !r.path, meta: ["置顶", "15 章", "约 20 小时"], snip: "从第一条输入文件，到发表级工作流：15 章、119 节的完整路线。" });
+      rows = noteRow({ title: "学习路线 · 开始使用", href: "#/", on: !r.path, meta: ["置顶", "15 章", "约 20 小时"], snip: "从第一条输入文件，到发表级工作流：15 章、119 节的完整路线。" }) +
+        noteRow({ title: "学习看板", href: "#/board", on: r.path === "board", meta: ["15 章", "进度"], snip: "六列卡片摊开全部章节：已读、未读一眼看到，点卡片直接读。" });
     } else if (f === "appendix") {
       title = "附录与工具";
       rows = APPENDIX_PAGES.map((p) => noteRow({
@@ -257,7 +258,7 @@
         snip: (c.subtitle || c.intro || "").replace(/\*\*/g, ""),
       })).join("");
     }
-    const count = f === "start" ? 1 : f === "appendix" ? APPENDIX_PAGES.length : (PART_GROUPS.find((x) => x.p === f) || { list: [] }).list.length;
+    const count = f === "start" ? 2 : f === "appendix" ? APPENDIX_PAGES.length : (PART_GROUPS.find((x) => x.p === f) || { list: [] }).list.length;
     $("#notelist").innerHTML = '<div class="list-head"><div class="list-title"><h2>' + esc(title) + '</h2><span class="n">' + count + ' 篇</span></div>' +
       '<button class="list-search" id="list-search" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg><span>搜索所有笔记</span></button></div>' +
       '<div class="note-rows">' + (rows || '<div class="list-empty">这个文件夹还没有笔记。</div>') + "</div>";
@@ -461,6 +462,52 @@
   }
 
   /* ---------------- 附录页 ---------------- */
+  function bcard(c) {
+    const done = !!state.visited[c.id];
+    const n = (c.sections || []).length;
+    return '<a class="bcard' + (done ? " done" : "") + '" href="#/' + c.id + '" data-done="' + (done ? 1 : 0) + '">' +
+      '<span class="bc-num">' + String(c.num).padStart(2, "0") + "</span>" +
+      '<span class="bc-body"><b>' + esc(c.title) + "</b><small>" + n + " 节 · 约 " + (c.hours || 1) + " 小时</small></span>" +
+      '<span class="bc-state">' + (done ? "已读" : "未读") + "</span></a>";
+  }
+
+  function boardHTML() {
+    const done = CHAPTERS.filter((c) => state.visited[c.id]).length;
+    const cols = PART_GROUPS.map((g) => {
+      const d = g.list.filter((c) => state.visited[c.id]).length;
+      return '<section class="bcol" data-part="' + esc(g.p) + '"><header class="bcol-h"><span>' + esc(g.p) + "</span><em>" + d + "/" + g.list.length + "</em></header>" +
+        '<div class="bcards">' + g.list.map(bcard).join("") + "</div></section>";
+    }).join("");
+    return pageHead("学习看板", "把 15 章摊成六列：哪章读过、哪章还没动，一眼看到。点卡片直接读，右上角可按状态筛。") +
+      '<div class="board-bar"><div class="board-stat"><b>' + done + "</b><span>/ " + CHAPTERS.length + " 章已读</span></div>" +
+      '<div class="board-progress"><i style="width:' + Math.round((done / Math.max(1, CHAPTERS.length)) * 100) + '%"></i></div>' +
+      '<div class="board-filter" id="board-filter"><button class="on" data-f="all" type="button">全部</button>' +
+      '<button data-f="todo" type="button">未读</button><button data-f="done" type="button">已读</button></div></div>' +
+      '<div class="board" id="board">' + cols + "</div>";
+  }
+
+  function initBoard() {
+    const box = $("#board"), bar = $("#board-filter");
+    if (!box || !bar) return;
+    bar.addEventListener("click", (e) => {
+      const b = e.target.closest("button[data-f]");
+      if (!b) return;
+      bar.querySelectorAll("button").forEach((x) => x.classList.toggle("on", x === b));
+      const f = b.dataset.f;
+      box.querySelectorAll(".bcard").forEach((card) => {
+        const isDone = card.dataset.done === "1";
+        card.classList.toggle("hide", f === "todo" ? isDone : f === "done" ? !isDone : false);
+      });
+      box.querySelectorAll(".bcol").forEach((col) => {
+        const cards = col.querySelectorAll(".bcard");
+        const vis = Array.from(cards).filter((c) => !c.classList.contains("hide")).length;
+        col.classList.toggle("empty", vis === 0);
+        const em = col.querySelector(".bcol-h em");
+        if (em) em.textContent = vis + "/" + cards.length;
+      });
+    });
+  }
+
   function pn(html) { return '<div class="page-note">' + html + "</div>"; }
   function pageHead(title, desc) {
     return '<div class="page-head"><h1>' + esc(title) + "</h1><p>" + desc + "</p></div>";
@@ -909,6 +956,12 @@
       view.innerHTML = pn(r.anchor ? demoPage(r.anchor) : toolsHTML());
       document.title = (r.anchor ? (TOOLS.find((t) => t.id === r.anchor) || {}).t || "工具箱" : "工具箱") + " · CP2K 学习手册";
       mountAllDemos();
+    } else if (r.path === "board") {
+      view.innerHTML = pn(boardHTML());
+      const pnEl = view.firstElementChild;
+      if (pnEl) pnEl.classList.add("page-wide");
+      document.title = "学习看板 · CP2K 学习手册";
+      initBoard();
     } else if (r.path === "about") {
       view.innerHTML = pn(pageHead("关于本站", "内容来源、演示说明与离线用法。") +
         "<h3>内容从哪来</h3><p>课程主线来自《庚子计算 · AIMD 与 CP2K》讲义 1–5（PDF 转文本后重新组织），并整合了课程资料包里的 howto、专题讲义与真实练习输入（Au-H2O、Cu(100)+水、Au/TiO₂、QM/MM 元动力学、packmol 建模）。参数、默认值与语法边界以 <a href=\"https://manual.cp2k.org/trunk/\" target=\"_blank\" rel=\"noopener\">CP2K 官方手册（trunk 版）</a>为准：抓取了其中 3093 个页面（123 个方法/安装/教程页 + 2970 个输入参考页）。全站重编为 15 章中文课程，每章末尾的「来源」列出对应的讲义与手册页；关键词速查与手册地图直接由抓取数据生成。</p>" +
@@ -931,10 +984,11 @@
     state.folder = folder;
     markSidebar();
     renderNotesList(r);
-    const label = c ? c.title : (!r.path ? "学习路线" : (APPENDIX_PAGES.find((p) => p.id === r.path) || {}).t || "学习手册");
+    const label = c ? c.title : (!r.path ? "学习路线" : r.path === "board" ? "学习看板" : (APPENDIX_PAGES.find((p) => p.id === r.path) || {}).t || "学习手册");
     const dt = $("#doc-title"); if (dt) dt.textContent = label;
     const crumb = $("#doc-crumb");
-    if (crumb) crumb.textContent = !r.path ? "CP2K · " + BOOK_TOTAL + " 章" : (folder === "appendix" ? "资料" : folder + (c ? " · 第 " + c.num + " 章" : ""));
+    if (crumb) crumb.textContent = !r.path ? "CP2K · " + BOOK_TOTAL + " 章" :
+      (folder === "appendix" ? "资料" : folder === "start" ? (r.path === "board" ? "笔记本 · 学习看板" : "笔记本") : folder + (c ? " · 第 " + c.num + " 章" : ""));
     document.body.classList.toggle("show-editor", !!r.path && state.editorPinned);
     document.body.classList.remove("toc-open", "nav-open");
     // 滚动
@@ -1049,14 +1103,88 @@
   }
 
   /* ---------------- 启动 ---------------- */
+
+  /* ---------------- 三栏宽度拖拽 ---------------- */
+  function initLayout() {
+    const shell = document.querySelector(".shell");
+    if (!shell) return;
+    const rootEl = document.documentElement;
+    const gutters = Array.from(document.querySelectorAll(".gutter"));
+    if (!gutters.length) return;
+    const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+    const widths = () => {
+      const cs = getComputedStyle(rootEl);
+      return {
+        side: parseFloat(cs.getPropertyValue("--sidebar-w")) || 232,
+        list: parseFloat(cs.getPropertyValue("--list-w")) || 318,
+      };
+    };
+    const apply = (side, list, persist) => {
+      rootEl.style.setProperty("--sidebar-w", Math.round(side) + "px");
+      rootEl.style.setProperty("--list-w", Math.round(list) + "px");
+      if (persist) store.set("cp2k.layout", { side: Math.round(side), list: Math.round(list) });
+    };
+    const saved = store.get("cp2k.layout", null);
+    if (saved && saved.side && saved.list) {
+      const total = window.innerWidth - 10;
+      let side = clamp(saved.side, 180, 380);
+      let list = clamp(saved.list, 240, 560);
+      if (total - side - list < 420) list = Math.max(240, total - side - 420);
+      apply(side, list, false);
+    }
+    let drag = null;
+    gutters.forEach((g) => {
+      g.addEventListener("pointerdown", (e) => {
+        if (matchMedia("(max-width: 920px)").matches) return;
+        const w = widths();
+        drag = { g, x: e.clientX, side: w.side, list: w.list, which: g.dataset.g };
+        try { g.setPointerCapture(e.pointerId); } catch (err) {}
+        document.body.classList.add("resizing");
+        e.preventDefault();
+      });
+      g.addEventListener("pointermove", (e) => {
+        if (!drag || drag.g !== g) return;
+        const dx = e.clientX - drag.x;
+        let side = drag.side, list = drag.list;
+        if (drag.which === "side") side = clamp(drag.side + dx, 180, 380);
+        else list = clamp(drag.list + dx, 240, 560);
+        const total = window.innerWidth - 10;
+        if (total - side - list < 420) {
+          if (drag.which === "side") side = Math.max(180, total - list - 420);
+          else list = Math.max(240, total - side - 420);
+        }
+        apply(side, list, false);
+      });
+      const end = () => {
+        if (!drag) return;
+        drag = null;
+        document.body.classList.remove("resizing");
+        const w = widths();
+        store.set("cp2k.layout", w);
+      };
+      g.addEventListener("pointerup", end);
+      g.addEventListener("pointercancel", end);
+      g.addEventListener("dblclick", () => apply(232, 318, true));
+      g.addEventListener("keydown", (e) => {
+        if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+        e.preventDefault();
+        const w = widths(), d = e.key === "ArrowLeft" ? -8 : 8;
+        if (g.dataset.g === "side") apply(clamp(w.side + d, 180, 380), w.list, true);
+        else apply(w.side, clamp(w.list + d, 240, 560), true);
+      });
+    });
+  }
+
   function boot() {
     renderSidebar();
     initEvents();
+    initLayout();
     if (!location.hash) history.replaceState(null, "", "#/");
     render();
   }
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot);
   else boot();
 })();
+
 
 
