@@ -659,3 +659,5 @@ body.printing .footer { display: none; }
   .sec h2 { border-top: 1px solid #ddd; }
 }
 @media print { .tbl, table, .demo, .quiz { break-inside: auto; } }
+/* 深色顶栏与侧栏同色 */
+html[data-theme="dark"] .topbar { background: #1f1f21 !important; border-bottom-color: #303032 !important; }
