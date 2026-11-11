@@ -11,7 +11,7 @@
   const ESC_MAP = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ESC_MAP[c]);
   const clamp = (n, a, b) => Math.max(a, Math.min(b, n));
-  const BUILD = "20261108";
+  const BUILD = "20261113";
   const CHAPTERS = Object.values(window.CONTENT || {}).sort((a, b) => a.num - b.num);
   const PARTS = ["起步", "输入与体系", "电子结构", "结构与振动", "动力学与自由能", "分析与实战"];
   const store = {
@@ -25,12 +25,17 @@
     visited: store.get("cp2k.visited", {}),
     quiz: store.get("cp2k.quiz", {}),
     route: { path: "", anchor: "" },
+    folder: "start",
+    editorPinned: true,
     manual: null,
     keywords: null,
     kwLoading: false,
   };
   const CHAPTER_IDS = new Set(CHAPTERS.map((c) => c.id));
   const CHAPTER_INDEX = new Map(CHAPTERS.map((c, i) => [c.id, i]));
+  const CHAPTER_BY_ID = new Map(CHAPTERS.map((c) => [c.id, c]));
+  const PART_GROUPS = PARTS.map((p) => ({ p, list: CHAPTERS.filter((c) => c.part === p) })).filter((g) => g.list.length);
+  const SECTION_COUNT = CHAPTERS.reduce((n, c) => n + (c.sections || []).length, 0);
   function countDone() {
     let n = 0;
     Object.keys(state.visited).forEach((k) => { if (CHAPTER_IDS.has(k)) n++; });
@@ -183,40 +188,81 @@
     }
   }
 
-  /* ---------------- 侧栏 ---------------- */
+  /* ---------------- 文件夹与笔记列表 ---------------- */
+  const APPENDIX_PAGES = [
+    { id: "reference", n: "A", t: "关键词速查", d: "3402 条关键词：类型、默认值、取值与所在节" },
+    { id: "map", n: "B", t: "手册地图", d: "3093 个官方手册页面的分组索引" },
+    { id: "units", n: "C", t: "单位与常数", d: "能量、长度、时间、压力与常用常数" },
+    { id: "glossary", n: "D", t: "术语表", d: "全书 103 条术语，按章节聚合" },
+    { id: "tools", n: "E", t: "工具箱", d: "5 个可以上手拖动的交互演示" },
+    { id: "scripts", n: "F", t: "脚本与样本", d: "课程配套脚本与四份真实输出" },
+  ];
+  const BOOK_TOTAL = CHAPTERS.length || 15;
+  const FOLDER_ICON = '<svg class="fi" viewBox="0 0 20 20" aria-hidden="true"><path d="M2.5 5.5A1.5 1.5 0 0 1 4 4h4l1.6 2H16a1.5 1.5 0 0 1 1.5 1.5v7A1.5 1.5 0 0 1 16 16H4a1.5 1.5 0 0 1-1.5-1.5z" fill="currentColor"/></svg>';
+
+  function folderForRoute(r) {
+    if (!r.path) return "start";
+    if (CHAPTER_BY_ID.has(r.path)) return CHAPTER_BY_ID.get(r.path).part;
+    return "appendix";
+  }
+
   function renderSidebar() {
-    const groups = PARTS.map((p) => ({ p, list: CHAPTERS.filter((c) => c.part === p) })).filter((g) => g.list.length);
-    let html = '<div class="side-group"><div class="side-label">开始</div>' +
-      '<a class="side-link" href="#/"><span class="n">◈</span><span>首页 · 学习路线</span></a></div>';
-    groups.forEach((g) => {
-      html += '<div class="side-group"><div class="side-label">' + esc(g.p) + "</div>";
-      g.list.forEach((c) => {
-        html += '<a class="side-link" data-ch="' + esc(c.id) + '" href="#/' + esc(c.id) + '">' +
-          '<span class="n">' + String(c.num).padStart(2, "0") + "</span><span>" + esc(c.title) + "</span>" +
-          '<span class="tick">●</span></a>';
-      });
-      html += "</div>";
+    let h = '<div class="side-brand"><span class="mark">CP</span><span><b>CP2K 学习手册</b><small>本地笔记本 · 离线可用</small></span></div>';
+    h += '<div class="side-label">笔记本</div><div class="side-group">';
+    h += '<button class="folder" data-folder="start" type="button">' + FOLDER_ICON + '<span class="fname">学习路线</span><span class="fcount">1</span></button></div>';
+    h += '<div class="side-label">课程</div><div class="side-group">';
+    PART_GROUPS.forEach((g) => {
+      h += '<button class="folder" data-folder="' + esc(g.p) + '" type="button">' + FOLDER_ICON +
+        '<span class="fname">' + esc(g.p) + '</span><span class="fcount">' + g.list.length + "</span></button>";
     });
-    html += '<div class="side-group"><div class="side-label">附录</div>' +
-      '<a class="side-link" data-page="reference" href="#/reference"><span class="n">A</span><span>关键词速查</span></a>' +
-      '<a class="side-link" data-page="map" href="#/map"><span class="n">B</span><span>手册地图</span></a>' +
-      '<a class="side-link" data-page="units" href="#/units"><span class="n">C</span><span>单位与常数</span></a>' +
-      '<a class="side-link" data-page="glossary" href="#/glossary"><span class="n">D</span><span>术语表</span></a>' +
-      '<a class="side-link" data-page="tools" href="#/tools"><span class="n">E</span><span>工具箱</span></a>' +
-      '<a class="side-link" data-page="scripts" href="#/scripts"><span class="n">F</span><span>脚本与样本</span></a></div>';
-    const total = CHAPTERS.length || 21;
+    h += "</div>";
+    h += '<div class="side-label">资料</div><div class="side-group">' +
+      '<button class="folder" data-folder="appendix" type="button">' + FOLDER_ICON + '<span class="fname">附录与工具</span><span class="fcount">' + APPENDIX_PAGES.length + "</span></button></div>";
     const done = countDone();
-    html += '<div class="side-progress"><div class="sp-top"><span>学习进度</span><span>' + done + " / " + total + '</span></div>' +
-      '<div class="bar"><i style="width:' + Math.round((done / total) * 100) + '%"></i></div></div>';
-    $("#sidebar").innerHTML = html;
+    h += '<div class="side-foot"><div class="side-progress"><div class="sp-top"><span>学习进度</span><span>' + done + " / " + BOOK_TOTAL +
+      '</span></div><div class="bar"><i style="width:' + Math.round((done / BOOK_TOTAL) * 100) + '%"></i></div></div>' +
+      '<div class="privacy">内容来自课程讲义与 CP2K 官方手册，全部保存在本机。</div></div>';
+    $("#sidebar").innerHTML = h;
   }
 
   function markSidebar() {
-    $$("#sidebar .side-link").forEach((a) => {
-      a.classList.toggle("on", state.route.path === (a.dataset.ch || a.dataset.page || "home") || (state.route.path === "" && a.getAttribute("href") === "#/"));
-      const ch = a.dataset.ch;
-      if (ch) a.classList.toggle("done", !!state.visited[ch]);
-    });
+    const f = state.folder;
+    $$("#sidebar .folder").forEach((b) => b.classList.toggle("on", b.dataset.folder === f));
+  }
+
+  function noteRow(o) {
+    return '<a class="note-row' + (o.on ? " on" : "") + '" href="' + o.href + '">' +
+      '<div class="nr-top"><span class="nr-title">' + esc(o.title) + "</span>" + (o.done ? '<span class="nr-done">●</span>' : "") + "</div>" +
+      '<div class="nr-meta">' + o.meta.map((m) => "<span>" + esc(m) + "</span>").join("") + "</div>" +
+      '<div class="nr-snip">' + esc(o.snip || "") + "</div></a>";
+  }
+
+  function renderNotesList(r) {
+    const f = state.folder;
+    let title = "学习路线", rows = "";
+    if (f === "start") {
+      rows = noteRow({ title: "学习路线 · 开始使用", href: "#/", on: !r.path, meta: ["置顶", "15 章", "约 20 小时"], snip: "从第一条输入文件，到发表级工作流：15 章、119 节的完整路线。" });
+    } else if (f === "appendix") {
+      title = "附录与工具";
+      rows = APPENDIX_PAGES.map((p) => noteRow({
+        title: p.t, href: "#/" + p.id, on: r.path === p.id,
+        meta: ["附录 " + p.n, "资料"], snip: p.d,
+      })).join("");
+    } else {
+      title = f;
+      const g = PART_GROUPS.find((x) => x.p === f);
+      rows = (g ? g.list : []).map((c) => noteRow({
+        title: c.title, href: "#/" + c.id, on: r.path === c.id, done: !!state.visited[c.id],
+        meta: ["第 " + String(c.num).padStart(2, "0") + " 章", (c.sections || []).length + " 节", "约 " + (c.hours || 1) + " 小时"],
+        snip: (c.subtitle || c.intro || "").replace(/\*\*/g, ""),
+      })).join("");
+    }
+    const count = f === "start" ? 1 : f === "appendix" ? APPENDIX_PAGES.length : (PART_GROUPS.find((x) => x.p === f) || { list: [] }).list.length;
+    $("#notelist").innerHTML = '<div class="list-head"><div class="list-title"><h2>' + esc(title) + '</h2><span class="n">' + count + ' 篇</span></div>' +
+      '<button class="list-search" id="list-search" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg><span>搜索所有笔记</span></button></div>' +
+      '<div class="note-rows">' + (rows || '<div class="list-empty">这个文件夹还没有笔记。</div>') + "</div>";
+    const ls = $("#list-search");
+    if (ls) ls.addEventListener("click", openSearch);
   }
 
   /* ---------------- 章节视图 ---------------- */
@@ -228,8 +274,8 @@
     h += '<header class="chapter-head"><div class="part">' + esc(c.part) + " · 第 " + c.num + " 章</div>" +
       '<div class="chapter-num-bg">' + String(c.num).padStart(2, "0") + "</div>" +
       "<h1>" + esc(c.title) + "</h1><p class=\"sub\">" + fmt(c.subtitle || "") + "</p>" +
-      '<div class="chapter-meta"><span>⏱ 约 ' + (c.hours || 1) + " 小时</span><span>📚 " + sections.length + " 节</span>" +
-      "<span>🎯 " + esc(c.level || "入门") + "</span></div></header>";
+      '<div class="chapter-meta"><span>约 ' + (c.hours || 1) + " 小时</span><span>" + sections.length + " 节</span>" +
+      "<span>" + esc(c.level || "入门") + "</span></div></header>";
     if (c.goals && c.goals.length) {
       h += '<div class="goals"><h2>学完这一章，你会</h2><ul>' + c.goals.map((g) => "<li>" + fmt(g) + "</li>").join("") + "</ul></div>";
     }
@@ -286,6 +332,8 @@
     }
     // 测验
     const qEls = $$(".q");
+    const qOpts = new WeakMap();
+    const quizScore = $(".quiz-score");
     qEls.forEach((q) => {
       const idx = +q.dataset.q;
       const data = c.quiz[idx];
@@ -294,7 +342,9 @@
         if (!btn || q.classList.contains("answered")) return;
         const pick = +btn.dataset.opt;
         q.classList.add("answered");
-        $$(".opt", q).forEach((b) => {
+        const opts = $$(".opt", q);
+        qOpts.set(q, opts);
+        opts.forEach((b) => {
           const j = +b.dataset.opt;
           if (j === data.answer) b.classList.add("right");
           else if (j === pick) b.classList.add("wrong");
@@ -304,9 +354,9 @@
         qEls.forEach((el) => {
           if (!el.classList.contains("answered")) return;
           answered++;
-          if (el.querySelector(".opt.right") && !el.querySelector(".opt.wrong")) right++;
+          const elOpts = qOpts.get(el) || [];
+          if (elOpts.some((b) => b.classList.contains("right")) && !elOpts.some((b) => b.classList.contains("wrong"))) right++;
         });
-        const quizScore = $(".quiz-score");
         if (quizScore) quizScore.textContent = "已答 " + answered + "/" + total + " 题 · 答对 " + right + " 题" + (answered === total ? (right === total ? " · 全对，可以进入下一章了。" : " · 回看错题所在小节。") : "");
       });
     });
@@ -369,77 +419,49 @@
 
   function homeHTML() {
     const done = countDone();
-    const secCount = CHAPTERS.reduce((n, c) => n + (c.sections || []).length, 0);
     const pages = (window.STATS && window.STATS.pages) || 3093;
-    const kws = (window.STATS && window.STATS.keywords) || "4000+";
+    const kws = (window.STATS && window.STATS.keywords) || 3402;
     const heroSource = hlCp2k(heroCode());
-    const parts = PARTS.map((p) => {
-      const list = CHAPTERS.filter((c) => c.part === p);
-      return list.length ? { p, list } : null;
-    }).filter(Boolean);
+    const rows = PART_GROUPS.map((g, i) => {
+      const first = g.list[0], last = g.list[g.list.length - 1];
+      return '<a class="route-row" href="#/' + first.id + '"><span class="rr-i">' + (i + 1) + '</span>' +
+        '<span class="rr-t">' + esc(g.p) + '</span><span class="rr-s">' + g.list.length + ' 章 · ' + first.num + "–" + last.num + "</span></a>";
+    }).join("");
 
-    let h = '<div class="hero"><div class="hero-inner"><div class="hero-copy">';
-    h += '<span class="eyebrow">CP2K 中文实战教程 · 非官方</span>';
-    h += "<h1>从第一行输入文件，<br>到<em>跑得动</em>的科研计算</h1>";
-    h += '<p class="lead">以《AIMD 与 CP2K》课程讲义为主线、官方手册（trunk，' + pages + ' 页）为参数依据：' + CHAPTERS.length + ' 章课程、交互式输入生成器、' + kws + ' 关键词速查。全部离线可用，双击即读。</p>';
-    h += '<div class="hero-cta"><a class="btn btn-primary" href="#/ch01">从第 1 章开始 →</a>' +
-      '<a class="btn btn-ghost" href="#/reference">关键词速查</a></div>';
-    h += '<div class="hero-meta"><span><b>' + CHAPTERS.length + "</b>章</span><span><b>" + secCount + "</b>节</span><span><b>5</b>个交互工具</span><span><b>" + pages + "</b>页手册索引</span></div>";
-    h += '</div><div class="hero-visual"><div class="term-card"><div class="term-bar"><i></i><i></i><i></i><span>h2o.inp — 第一个 CP2K 计算</span></div>';
-    h += '<div class="term-body">' + heroSource + "</div></div>";
-    h += '<div class="term-note"><b>cp2k.psmp</b><span>−o h2o.out</span><span style="color:var(--ok)">✓ 完成</span></div>';
-    h += '</div></div></div>';
-
-    h += '<div class="section-wrap"><section class="home-block"><div class="stat-grid">';
-    h += '<div class="stat"><b>' + CHAPTERS.length + '</b><span>主线章节</span><small>从原理到发表级工作流</small></div>';
-    h += '<div class="stat"><b>' + secCount + '</b><span>教学小节</span><small>每节配可运行示例</small></div>';
-    h += '<div class="stat"><b>' + pages + '</b><span>手册页面索引</span><small>官方手册全量映射</small></div>';
-    h += '<div class="stat"><b>' + kws + '</b><span>CP2K 关键词</span><small>含类型、默认值、说明</small></div>';
-    h += "</div></section>";
-
-    h += '<section class="home-block"><div class="block-head"><div><h2>学习路线</h2><p>六段式：从原理与方法版图，到输入、电子结构、振动、动力学，最后做分析与发布。</p></div></div><div class="path">';
-    const stages = [
-      { s: "STAGE 01", t: "原理与装好", d: "CP2K 能做什么、AIMD 在算什么、怎么装起来跑通。", c: ["ch01", "ch02", "ch03"] },
-      { s: "STAGE 02", t: "输入与体系", d: "输入文件四层结构、基组赝势坐标、建模与网格精度。", c: ["ch04", "ch05", "ch06"] },
-      { s: "STAGE 03", t: "电子结构", d: "泛函、色散、DFT+U、磁性、杂化，以及 OT 与对角化。", c: ["ch07", "ch08"] },
-      { s: "STAGE 04", t: "结构与振动", d: "几何/晶胞优化、过渡态、频率与 TRAVIS 光谱。", c: ["ch09", "ch10"] },
-      { s: "STAGE 05", t: "动力学与自由能", d: "AIMD 实战、恒温器与续算，增强采样与自由能面。", c: ["ch11", "ch12"] },
-      { s: "STAGE 06", t: "分析与发布", d: "轨迹/电子结构分析、表面+水与 QM/MM 案例、发表级工作流。", c: ["ch13", "ch14", "ch15"] },
-    ];
-    stages.forEach((st) => {
-      h += '<div class="path-card"><div class="stage">' + st.s + "</div><h3>" + st.t + "</h3><p>" + st.d + '</p><div class="chips">' +
-        st.c.map((id) => { const c = CHAPTERS.find((x) => x.id === id); return c ? '<a class="chip" href="#/' + id + '">' + esc(c.title) + "</a>" : ""; }).join("") + "</div></div>";
-    });
-    h += "</div></section>";
-
-    h += '<section class="home-block"><div class="block-head"><div><h2>不只是文字教程</h2><p>能动手的地方，都做成了演示。</p></div><a class="more" href="#/tools">全部工具 →</a></div><div class="feature-grid">';
-    const feats = [
-      { i: "⌨", t: "输入文件生成器", d: "选体系、方法、任务，实时生成合法 CP2K 输入，附带逐行解释。", u: "#/tools" },
-      { i: "▦", t: "CUTOFF 网格演示", d: "拖动截断能与相对截断能，看多网格如何分配、哪些函数被投到哪层。", u: "#/tools" },
-      { i: "∿", t: "SCF 收敛模拟", d: "切换 DIIS、混合参数和 OT，观察密度残差怎样收敛或发散。", u: "#/tools" },
-      { i: "≈", t: "MD 恒温器演示", d: "NVE/NVT、Langevin、Nosé–Hoover，看温度与能量曲线怎么变。", u: "#/tools" },
-      { i: "⇄", t: "单位换算器", d: "Hartree、eV、kcal/mol、Å、Bohr、fs 之间即时换算。", u: "#/units" },
-      { i: "🔎", t: "全量关键词速查", d: "官方手册里的每一个输入关键词，带类型、默认值和一句话说明。", u: "#/reference" },
-    ];
-    feats.forEach((f) => {
-      h += '<a class="feature" href="' + f.u + '"><div class="ic">' + f.i + "</div><h3>" + f.t + "</h3><p>" + f.d + '</p><span class="go">打开 →</span></a>';
-    });
-    h += "</div></section>";
-
-    h += '<section class="home-block"><div class="quickstart"><div><h3>5 分钟跑通第一个计算</h3><p>假设你已经有可用的 cp2k.psmp。没有？先看第 3 章。</p><ol class="qs-steps">' +
-      "<li>新建目录，把右侧输入存为 <code>h2o.inp</code>。</li>" +
-      "<li>运行 <code>cp2k.psmp -i h2o.inp -o h2o.out</code>。</li>" +
-      "<li>在 <code>h2o.out</code> 里搜 <code>ENERGY|</code>。</li>" +
-      "<li>读第 4 章，弄懂每一行在做什么。</li></ol></div>";
-    h += '<div class="code"><div class="code-head"><span class="lang">cp2k</span><span class="file">h2o.inp</span><span class="spacer"></span><button class="copy-btn" type="button">复制</button></div><pre><code>' + heroSource + "</code></pre></div>";
-    h += "</div></section>";
-
-    h += '<section class="home-block"><div class="home-cta"><h2>准备好把 CP2K 用起来了吗？</h2><p>已有进度：' + done + "/" + (CHAPTERS.length || 21) + ' 章。建议从「认识 CP2K」开始，按顺序推进。</p><div class="hero-cta" style="justify-content:center"><a class="btn btn-primary" href="#/ch01">从第 1 章开始</a><a class="btn btn-ghost" href="#/map">先看手册地图</a></div></div></section>';
+    let h = '<article class="page-note">';
+    h += '<div class="home-hero"><div class="kicker">AIMD 与 CP2K 讲义 · 官方手册逐条对照 · 全部离线</div>' +
+      "<h1>从第一行输入文件，到跑得动的科研计算</h1>" +
+      '<p class="lede">15 章中文课程，按六个文件夹组织成一本备忘录：每章给目标、给可运行输入、给自测，参数与默认值都能回到官方手册原页。' +
+      "适合第一次用 CP2K 做表面/水/电催化模拟的人，也适合把 AIMD 从入门推到发表级工作流。</p>" +
+      '<div class="home-stats"><span><b>' + CHAPTERS.length + '</b>章</span><span><b>' + SECTION_COUNT + '</b>节</span><span><b>107</b>段代码</span><span><b>' + kws + '</b>关键词</span><span><b>' + pages + '</b>页手册索引</span></div>';
     h += "</div>";
+
+    h += '<div class="goals"><h2>开始之前，先确认三件事</h2><ul>' +
+      "<li>你有一台能跑 Linux 的机器（Windows 走 WSL），并且装好了 <code>cp2k.psmp</code>；没有就先看第 3 章。</li>" +
+      "<li>你想算的是周期性体系（表面、液体、晶体）——这是课程练习的主线；孤立分子同样适用。</li>" +
+      "<li>你愿意按「输入 → 运行 → 读输出 → 改参数」的节奏走，而不是先背完所有关键词。</li></ul></div>";
+
+    h += '<h3 style="margin-top:26px">六段路线</h3><div class="home-route">' + rows + "</div>";
+
+    h += '<h3>5 分钟跑通第一个计算</h3><p>已经有可用的 <code>cp2k.psmp</code> 时，把右边的输入存成 <code>h2o.inp</code>，运行 <code>cp2k.psmp -i h2o.inp -o h2o.out</code>，然后在输出里搜 <code>ENERGY|</code>。每一行在做什么，第 4 章逐层拆开。</p>';
+    h += '<div class="code"><div class="code-head"><span class="lang">cp2k</span><span class="code-title">h2o.inp — 第一个 CP2K 计算</span><button class="copy-btn" type="button">复制</button></div><pre><code>' + heroSource + "</code></pre></div>";
+
+    h += '<h3>随手可用</h3><div class="home-tools">' +
+      '<a href="#/tools/inputbuilder">输入生成器<small>选体系与方法，实时生成合法输入</small></a>' +
+      '<a href="#/tools/grid">CUTOFF 网格<small>看多层网格怎么分配格点</small></a>' +
+      '<a href="#/tools/scf">SCF 收敛<small>DIIS、混合与 OT 的残差曲线</small></a>' +
+      '<a href="#/reference">关键词速查<small>' + kws + ' 条，含类型与默认值</small></a>' +
+      '<a href="#/scripts">脚本与样本<small>4 个后处理脚本 + 4 份真实输出</small></a>' +
+      '<a href="#/map">手册地图<small>' + pages + ' 页按方法分组</small></a></div>';
+
+    h += '<p style="margin-top:26px;color:var(--ink-3);font-size:12.5px">已读 ' + done + " / " + BOOK_TOTAL +
+      " 章。进度只记在这台机器的浏览器里；换设备不会同步。</p>";
+    h += "</article>";
     return h;
   }
 
   /* ---------------- 附录页 ---------------- */
+  function pn(html) { return '<div class="page-note">' + html + "</div>"; }
   function pageHead(title, desc) {
     return '<div class="page-head"><h1>' + esc(title) + "</h1><p>" + desc + "</p></div>";
   }
@@ -455,7 +477,8 @@
     const q = $("#refq"), sel = $("#refpage"), box = $("#refres"), cnt = $("#refcount");
     if (!q) return;
     const ensure = () => {
-      if (state.keywords) { fill(); return; }
+      const data = state.keywords || (Array.isArray(window.KEYWORDS) ? window.KEYWORDS : null);
+      if (data && data.length) { state.keywords = data; fill(); return; }
       box.innerHTML = '<div class="empty">正在载入关键词数据（首次约 1–2 秒）…</div>';
       loadKeywords(() => { fill(); });
     };
@@ -538,7 +561,8 @@
       }).join("") || '<div class="empty">没有匹配的页面。</div>';
     };
     const ensure = () => {
-      if (state.manual) { indexManual(); paint(); return; }
+      const data = state.manual || (Array.isArray(window.MANUAL) ? window.MANUAL : null);
+      if (data && data.length) { state.manual = data; indexManual(); paint(); return; }
       box.innerHTML = '<div class="empty">正在载入手册索引…</div>';
       loadScript("js/data/manual.js", () => { state.manual = window.MANUAL || []; indexManual(); paint(); });
     };
@@ -793,11 +817,12 @@
     }
     const hits = idx.filter((x) => x.hay.includes(term));
     hits.sort((a, b) => (a.tl.startsWith(term) ? 0 : 1) - (b.tl.startsWith(term) ? 0 : 1));
-    searchHits = hits.slice(0, 40);
+    const topHits = hits.slice(0, 40);
+    searchHits = topHits;
     searchSel = 0;
     if (!hits.length) { box.innerHTML = '<div class="sr-empty">没有找到「' + esc(q) + "」</div>"; return; }
     let html = "", lastG = "";
-    hits.slice(0, 40).forEach((x, i) => {
+    topHits.forEach((x, i) => {
       if (x.g !== lastG) { html += '<div class="sr-group">' + esc(x.g) + "</div>"; lastG = x.g; }
       html += '<a class="sr' + (i === 0 ? " sel" : "") + '" href="' + esc(x.u) + '"' + (x.ext ? ' target="_blank" rel="noopener"' : "") + ' data-i="' + i + '">' +
         '<span class="sr-t">' + esc(x.t) + '</span><span class="sr-d">' + esc((x.d || "").slice(0, 80)) + "</span></a>";
@@ -823,23 +848,33 @@
     s.onerror = () => cb && cb();
     document.head.appendChild(s);
   }
+  let kwQueue = [];
   function loadKeywords(cb) {
-    if (state.keywords) return cb && cb();
+    if (state.keywords && state.keywords.length) return cb && cb();
+    if (cb) kwQueue.push(cb);
     if (state.kwLoading) return;
+    if (Array.isArray(window.KEYWORDS) && window.KEYWORDS.length) {
+      state.keywords = window.KEYWORDS; searchIndex = null;
+      const q = kwQueue; kwQueue = []; q.forEach((f) => f && f());
+      return;
+    }
     state.kwLoading = true;
-    loadScript("js/data/keywords.js", () => {
+    const done = () => {
       state.keywords = window.KEYWORDS || [];
       state.kwLoading = false;
       searchIndex = null;
-      cb && cb();
-    });
+      const q = kwQueue; kwQueue = [];
+      q.forEach((f) => f && f());
+    };
+    loadScript("js/data/keywords.js", done);
   }
 
   /* ---------------- 路由 ---------------- */
   function parseHash() {
     const h = (location.hash || "").replace(/^#\/?/, "");
     const parts = h.split("/");
-    return { path: parts[0] || "", anchor: parts[1] || "", query: h.split("?")[1] || "" };
+    const queryAt = h.indexOf("?");
+    return { path: parts[0] || "", anchor: parts[1] || "", query: queryAt < 0 ? "" : h.slice(queryAt + 1) };
   }
 
   function render() {
@@ -852,48 +887,56 @@
       view.innerHTML = homeHTML();
       document.title = "CP2K 学习手册 · 从第一行输入到科研计算";
     } else if (r.path === "reference") {
-      view.innerHTML = referenceHTML();
+      view.innerHTML = pn(referenceHTML());
       document.title = "关键词速查 · CP2K 学习手册";
       initReference();
     } else if (r.path === "map") {
-      view.innerHTML = mapHTML();
+      view.innerHTML = pn(mapHTML());
       document.title = "手册地图 · CP2K 学习手册";
       initMap();
     } else if (r.path === "units") {
-      view.innerHTML = unitsHTML();
+      view.innerHTML = pn(unitsHTML());
       document.title = "单位与常数 · CP2K 学习手册";
       initUnits();
     } else if (r.path === "glossary") {
-      view.innerHTML = glossaryHTML();
+      view.innerHTML = pn(glossaryHTML());
       document.title = "术语表 · CP2K 学习手册";
       initGlossary();
     } else if (r.path === "scripts") {
-      view.innerHTML = scriptsHTML();
+      view.innerHTML = pn(scriptsHTML());
       document.title = "脚本与样本 · CP2K 学习手册";
     } else if (r.path === "tools") {
-      view.innerHTML = r.anchor ? demoPage(r.anchor) : toolsHTML();
+      view.innerHTML = pn(r.anchor ? demoPage(r.anchor) : toolsHTML());
       document.title = (r.anchor ? (TOOLS.find((t) => t.id === r.anchor) || {}).t || "工具箱" : "工具箱") + " · CP2K 学习手册";
       mountAllDemos();
     } else if (r.path === "about") {
-      view.innerHTML = pageHead("关于本站", "非官方 CP2K 中文教程，离线可读。") +
+      view.innerHTML = pn(pageHead("关于本站", "内容来源、演示说明与离线用法。") +
         "<h3>内容从哪来</h3><p>课程主线来自《庚子计算 · AIMD 与 CP2K》讲义 1–5（PDF 转文本后重新组织），并整合了课程资料包里的 howto、专题讲义与真实练习输入（Au-H2O、Cu(100)+水、Au/TiO₂、QM/MM 元动力学、packmol 建模）。参数、默认值与语法边界以 <a href=\"https://manual.cp2k.org/trunk/\" target=\"_blank\" rel=\"noopener\">CP2K 官方手册（trunk 版）</a>为准：抓取了其中 3093 个页面（123 个方法/安装/教程页 + 2970 个输入参考页）。全站重编为 15 章中文课程，每章末尾的「来源」列出对应的讲义与手册页；关键词速查与手册地图直接由抓取数据生成。</p>" +
         "<h3>哪些是「示意」</h3><p>交互演示里的 SCF 收敛曲线、MD 恒温器、CUTOFF 网格分配都是教学模型：它们遵循手册里的定性规律（多层网格、DIIS/OT 的收敛速度、恒温器对温度的控制），但不是真实求解器，不能用来预测具体数值。正文中凡引用具体数值，都标明来自手册示例或需要自测。</p>" +
         "<h3>使用与许可</h3><p>站点代码（HTML/CSS/JS 与构建脚本）可自由用于学习与教学；手册文本与关键词说明版权归 CP2K 项目，按其许可使用；CP2K 本身是 GPLv2。示例在 Linux + cp2k.psmp 下验证语法，但不同版本、不同基组/赝势文件可能导致结果差异——正式计算前请以官方手册为准。</p>" +
         "<h3>怎么离线用</h3><p>把整个目录拷到任何机器，双击 <code>index.html</code> 即可。不需要联网，也不依赖任何 CDN。搜索用 <code>Ctrl K</code>，打印用顶栏的打印按钮（会去掉侧栏和按钮，只留正文）。</p>" +
-        "<h3>反馈</h3><p>发现错误时，先对照本章「来源」里的手册页；若确认是本站写错，请记录章节号与小节号，方便修订。</p>";
+        "<h3>反馈</h3><p>发现错误时，先对照本章「来源」里的手册页；若确认是本站写错，请记录章节号与小节号，方便修订。</p>");
     } else {
-      c = CHAPTERS.find((x) => x.id === r.path);
+      c = CHAPTER_BY_ID.get(r.path);
       if (c) {
         view.innerHTML = chapterHTML(c);
         document.title = c.title + " · CP2K 学习手册";
         initChapter(c);
       } else {
-        view.innerHTML = pageHead("页面不存在", "这个地址没有对应的内容。") + '<p><a href="#/">回到首页</a></p>';
+        view.innerHTML = pn(pageHead("页面不存在", "这个地址没有对应的内容。") + '<p><a href="#/">回到首页</a></p>');
         document.title = "页面不存在 · CP2K 学习手册";
       }
     }
+    const folder = folderForRoute(r);
+    state.folder = folder;
     markSidebar();
-    syncTopnav();
+    renderNotesList(r);
+    const label = c ? c.title : (!r.path ? "学习路线" : (APPENDIX_PAGES.find((p) => p.id === r.path) || {}).t || "学习手册");
+    const dt = $("#doc-title"); if (dt) dt.textContent = label;
+    const crumb = $("#doc-crumb");
+    if (crumb) crumb.textContent = !r.path ? "CP2K · " + BOOK_TOTAL + " 章" : (folder === "appendix" ? "资料" : folder + (c ? " · 第 " + c.num + " 章" : ""));
+    document.body.classList.toggle("show-editor", !!r.path && state.editorPinned);
+    document.body.classList.remove("toc-open", "nav-open");
     // 滚动
     if (r.anchor) {
       requestAnimationFrame(() => {
@@ -905,13 +948,15 @@
       window.scrollTo(0, 0);
     }
     closeSearch();
-    $("#sidebar").classList.remove("open");
+    document.body.classList.remove("nav-open");
     if (window.hljs) { /* noop */ }
   }
 
+  let topnavLinks = null;
   function syncTopnav() {
     const p = state.route.path;
-    $$(".topnav a").forEach((a) => {
+    if (!topnavLinks) topnavLinks = $$(".topnav a");
+    topnavLinks.forEach((a) => {
       const href = a.getAttribute("href").replace("#/", "");
       a.classList.toggle("on", href === p || (href === "" && !p));
     });
@@ -940,20 +985,32 @@
     };
     applyTheme(state.theme);
     document.addEventListener("click", (e) => {
-      const copyBtn = e.target.closest(".copy-btn");
-      if (e.target.closest("#theme-btn")) applyTheme(state.theme === "dark" ? "light" : "dark");
-      if (e.target.closest("#print-btn")) window.print();
-      if (e.target.closest("#menu-btn")) $("#sidebar").classList.toggle("open");
-      if (copyBtn) {
-        const btn = copyBtn;
+      const action = e.target.closest && e.target.closest("#theme-btn,#print-btn,#menu-btn,.copy-btn,#search-btn,#search-close,#toc-btn,#back-list,#back-btn,#fwd-btn,.folder,.note-row");
+      if (!action) return;
+      if (action.id === "theme-btn") applyTheme(state.theme === "dark" ? "light" : "dark");
+      else if (action.id === "print-btn") window.print();
+      else if (action.id === "menu-btn") document.body.classList.toggle("nav-open");
+      else if (action.classList.contains("copy-btn")) {
+        const btn = action;
         const pre = btn.closest(".code").querySelector("pre");
         const text = pre.textContent;
         const done = () => { btn.textContent = "已复制"; btn.classList.add("ok"); setTimeout(() => { btn.textContent = "复制"; btn.classList.remove("ok"); }, 1600); };
         if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(done).catch(() => fallbackCopy(text, done));
         else fallbackCopy(text, done);
+      } else if (action.id === "search-btn") { e.preventDefault(); openSearch(); }
+      else if (action.id === "search-close") closeSearch();
+      else if (action.id === "toc-btn") { e.preventDefault(); document.body.classList.toggle("toc-open"); }
+      else if (action.id === "back-list") { state.editorPinned = false; document.body.classList.remove("show-editor"); }
+      else if (action.id === "back-btn") history.back();
+      else if (action.id === "fwd-btn") history.forward();
+      else if (action.classList.contains("folder")) {
+        const f = action.dataset.folder;
+        state.editorPinned = window.innerWidth > 920;
+        if (f === "start") location.hash = "#/";
+        else if (f === "appendix") location.hash = "#/reference";
+        else { const g = PART_GROUPS.find((x) => x.p === f); if (g && g.list[0]) location.hash = "#/" + g.list[0].id; else { state.folder = f; markSidebar(); renderNotesList(state.route); } }
       }
-      if (e.target.closest("#search-btn")) { e.preventDefault(); openSearch(); }
-      if (e.target.closest("#search-close")) closeSearch();
+      else if (action.classList.contains("note-row")) { state.editorPinned = true; document.body.classList.add("show-editor"); }
     });
     function fallbackCopy(text, cb) {
       const ta = document.createElement("textarea");
@@ -965,12 +1022,18 @@
 
     // 键盘
     const searchOverlay = $("#search-overlay");
+    document.addEventListener("click", (e) => {
+      if (!document.body.classList.contains("toc-open")) return;
+      if (e.target.closest(".toc") || e.target.closest("#toc-btn")) return;
+      document.body.classList.remove("toc-open");
+    });
+
     document.addEventListener("keydown", (e) => {
       const open = searchOverlay && searchOverlay.classList.contains("open");
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") { e.preventDefault(); open ? closeSearch() : openSearch(); return; }
       if (e.key === "/" && !open && !/input|textarea|select/i.test((e.target.tagName || ""))) { e.preventDefault(); openSearch(); return; }
       if (!open) return;
-      if (e.key === "Escape") { closeSearch(); }
+      if (e.key === "Escape") { closeSearch(); document.body.classList.remove("toc-open", "nav-open"); }
       if (e.key === "ArrowDown") { e.preventDefault(); moveSearch(1); }
       if (e.key === "ArrowUp") { e.preventDefault(); moveSearch(-1); }
       if (e.key === "Enter") {
@@ -995,3 +1058,4 @@
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot);
   else boot();
 })();
+

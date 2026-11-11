@@ -5,47 +5,35 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>CP2K 学习手册 · 从第一行输入到科研计算</title>
 <meta name="description" content="基于 CP2K 官方手册与实战课程的中文教程：15 章主线、交互式输入生成器、全量关键词速查。离线可用。">
-<link rel="stylesheet" href="css/style.css?v=20261108">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230d9488'/%3E%3Ctext x='16' y='22' font-family='monospace' font-size='13' font-weight='700' fill='white' text-anchor='middle'%3ECP%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="css/style.css?v=20261113">
+<link rel="stylesheet" href="css/notes.css?v=20261113">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23f5c518'/%3E%3Ctext x='16' y='22' font-family='-apple-system,Segoe UI,sans-serif' font-size='12' font-weight='700' fill='%233a2c00' text-anchor='middle'%3ECP%3C/text%3E%3C/svg%3E">
 </head>
 <body>
 <a class="skip" href="#view">跳到正文</a>
 
 <header class="topbar">
-  <a class="brand" href="#/" aria-label="CP2K 学习手册 首页">
-    <span class="brand-mark">CP2K</span>
-    <span>学习手册<small>CP2K · 中文实战教程</small></span>
-  </a>
-  <nav class="topnav" aria-label="主导航">
-    <a href="#/">首页</a>
-    <a href="#/ch01">课程</a>
-    <a href="#/reference">关键词</a>
-    <a href="#/map">手册地图</a>
-    <a href="#/tools">工具箱</a>
-  </nav>
+  <div class="traffic" aria-hidden="true"><i></i><i></i><i></i></div>
+  <button class="navbtn" id="back-btn" type="button" aria-label="后退">‹</button>
+  <button class="navbtn" id="fwd-btn" type="button" aria-label="前进">›</button>
+  <button class="tb-btn back-to-list" id="back-list" type="button" aria-label="返回笔记列表">‹ 笔记</button>
+  <div class="tb-title"><span id="doc-title">学习手册</span><span class="crumb" id="doc-crumb">CP2K · 15 章</span></div>
   <span class="topbar-spacer"></span>
-  <button class="tb-btn search-hint" id="search-btn" type="button" aria-label="搜索">
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
-    <span class="lbl">搜索章节 / 关键词</span><kbd class="kbd">Ctrl K</kbd>
+  <button class="tb-btn" id="toc-btn" type="button" aria-label="本页目录"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16M4 12h10M4 18h13"/></svg><span class="lbl">目录</span></button>
+  <button class="search-field" id="search-btn" type="button" aria-label="搜索">
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+    <span>搜索</span>
   </button>
-  <button class="tb-btn mobile-only" id="menu-btn" type="button" aria-label="打开目录">☰</button>
   <button class="tb-btn" id="print-btn" type="button" aria-label="打印"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9V2h12v7"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg></button>
   <button class="tb-btn" id="theme-btn" type="button" aria-label="切换深浅色">☾</button>
+  <button class="tb-btn mobile-only" id="menu-btn" type="button" aria-label="打开文件夹"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg></button>
 </header>
 
 <div class="shell">
-  <nav class="sidebar" id="sidebar" aria-label="章节目录"></nav>
+  <aside class="sidebar" id="sidebar" aria-label="文件夹"></aside>
+  <section class="noteslist" id="notelist" aria-label="笔记列表"></section>
   <main class="main"><div class="content" id="view"></div></main>
 </div>
-
-<footer class="footer">
-  <div class="footer-inner">
-    <div class="disclaimer">
-      <b>CP2K 学习手册</b> · 非官方中文教程。内容整理自 <a href="https://manual.cp2k.org/trunk/" target="_blank" rel="noopener">CP2K 官方手册（trunk）</a>，示例均在 Linux 下验证思路；CP2K 与手册版权归其作者所有。发现错误请以官方手册为准。
-    </div>
-    <div><a href="#/about">关于本站</a> · <a href="#/reference">关键词速查</a> · <a href="#/map">手册地图</a></div>
-  </div>
-</footer>
 
 <!-- 搜索面板 -->
 <div class="search-overlay" id="search-overlay" role="dialog" aria-modal="true" aria-label="搜索">
@@ -61,33 +49,33 @@
 </div>
 
 <!-- 数据 -->
-<script src="js/data/stats.js?v=20261108"></script>
-<script src="js/data/manual.js?v=20261108"></script>
+<script src="js/data/stats.js?v=20261113"></script>
+<script src="js/data/manual.js?v=20261113"></script>
 
 <!-- 章节内容（新增章节后在此追加） -->
-<script src="js/content/ch01.js?v=20261108"></script>
-<script src="js/content/ch02.js?v=20261108"></script>
-<script src="js/content/ch03.js?v=20261108"></script>
-<script src="js/content/ch04.js?v=20261108"></script>
-<script src="js/content/ch05.js?v=20261108"></script>
-<script src="js/content/ch06.js?v=20261108"></script>
-<script src="js/content/ch07.js?v=20261108"></script>
-<script src="js/content/ch08.js?v=20261108"></script>
-<script src="js/content/ch09.js?v=20261108"></script>
-<script src="js/content/ch10.js?v=20261108"></script>
-<script src="js/content/ch11.js?v=20261108"></script>
-<script src="js/content/ch12.js?v=20261108"></script>
-<script src="js/content/ch13.js?v=20261108"></script>
-<script src="js/content/ch14.js?v=20261108"></script>
-<script src="js/content/ch15.js?v=20261108"></script>
+<script src="js/content/ch01.js?v=20261113"></script>
+<script src="js/content/ch02.js?v=20261113"></script>
+<script src="js/content/ch03.js?v=20261113"></script>
+<script src="js/content/ch04.js?v=20261113"></script>
+<script src="js/content/ch05.js?v=20261113"></script>
+<script src="js/content/ch06.js?v=20261113"></script>
+<script src="js/content/ch07.js?v=20261113"></script>
+<script src="js/content/ch08.js?v=20261113"></script>
+<script src="js/content/ch09.js?v=20261113"></script>
+<script src="js/content/ch10.js?v=20261113"></script>
+<script src="js/content/ch11.js?v=20261113"></script>
+<script src="js/content/ch12.js?v=20261113"></script>
+<script src="js/content/ch13.js?v=20261113"></script>
+<script src="js/content/ch14.js?v=20261113"></script>
+<script src="js/content/ch15.js?v=20261113"></script>
 
 <!-- 演示 -->
-<script src="js/demos/inputbuilder.js?v=20261108"></script>
-<script src="js/demos/grid.js?v=20261108"></script>
-<script src="js/demos/scf.js?v=20261108"></script>
-<script src="js/demos/md.js?v=20261108"></script>
-<script src="js/demos/units.js?v=20261108"></script>
+<script src="js/demos/inputbuilder.js?v=20261113"></script>
+<script src="js/demos/grid.js?v=20261113"></script>
+<script src="js/demos/scf.js?v=20261113"></script>
+<script src="js/demos/md.js?v=20261113"></script>
+<script src="js/demos/units.js?v=20261113"></script>
 
-<script src="js/app.js?v=20261108"></script>
+<script src="js/app.js?v=20261113"></script>
 </body>
 </html>
