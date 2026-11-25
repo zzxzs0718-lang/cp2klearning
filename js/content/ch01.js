@@ -73,7 +73,7 @@
             rows: [
               ["电子结构程序", "DFT（LDA/GGA/meta/杂化）、MP2/RPA 等后 HF、DFTB、半经验（AM1/PM3/PM6/RM1/MNDO）", "第 6–8 章"],
               ["动力学引擎", "BOMD、Ehrenfest dynamics、Monte Carlo、metadynamics、振动分析", "第 2、11、12 章"],
-              ["多尺度平台", "QM/MM、QM/ML、隐式溶剂、经典力场（AMBER/CHARMM）", "第 14 章"],
+              ["多尺度平台", "QM/MM、QM/ML、隐式溶剂、经典力场（AMBER/CHARMM）", "第 16 章"],
             ],
             caption: "同一个 MD 驱动可以接不同 FORCE_EVAL：力场、ML 势、半经验、QM/MM 或 AIMD。",
           },

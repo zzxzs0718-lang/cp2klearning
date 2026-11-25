@@ -11,9 +11,9 @@
   const ESC_MAP = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ESC_MAP[c]);
   const clamp = (n, a, b) => Math.max(a, Math.min(b, n));
-  const BUILD = "20261115";
+  const BUILD = "20261126";
   const CHAPTERS = Object.values(window.CONTENT || {}).sort((a, b) => a.num - b.num);
-  const PARTS = ["起步", "输入与体系", "电子结构", "结构与振动", "动力学与自由能", "分析与实战"];
+  const PARTS = ["起步", "输入与体系", "电子结构", "结构与振动", "动力学与自由能", "后处理", "实战"];
   const store = {
     get(k, d) {
       try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; }
@@ -36,6 +36,8 @@
   const CHAPTER_BY_ID = new Map(CHAPTERS.map((c) => [c.id, c]));
   const PART_GROUPS = PARTS.map((p) => ({ p, list: CHAPTERS.filter((c) => c.part === p) })).filter((g) => g.list.length);
   const SECTION_COUNT = CHAPTERS.reduce((n, c) => n + (c.sections || []).length, 0);
+  const CODE_COUNT = CHAPTERS.reduce((n, c) => n + (c.sections || []).reduce((m, s) => m + (s.blocks || []).filter((b) => b.type === "code").length, 0), 0);
+  const TERM_COUNT = CHAPTERS.reduce((n, c) => n + (c.terms || []).length, 0);
   function countDone() {
     let n = 0;
     Object.keys(state.visited).forEach((k) => { if (CHAPTER_IDS.has(k)) n++; });
@@ -193,7 +195,7 @@
     { id: "reference", n: "A", t: "关键词速查", d: "3402 条关键词：类型、默认值、取值与所在节" },
     { id: "map", n: "B", t: "手册地图", d: "3093 个官方手册页面的分组索引" },
     { id: "units", n: "C", t: "单位与常数", d: "能量、长度、时间、压力与常用常数" },
-    { id: "glossary", n: "D", t: "术语表", d: "全书 103 条术语，按章节聚合" },
+    { id: "glossary", n: "D", t: "术语表", d: "全书 " + TERM_COUNT + " 条术语，按章节聚合" },
     { id: "tools", n: "E", t: "工具箱", d: "5 个可以上手拖动的交互演示" },
     { id: "scripts", n: "F", t: "脚本与样本", d: "课程配套脚本与四份真实输出" },
   ];
@@ -241,8 +243,8 @@
     const f = state.folder;
     let title = "学习路线", rows = "";
     if (f === "start") {
-      rows = noteRow({ title: "学习路线 · 开始使用", href: "#/", on: !r.path, meta: ["置顶", "15 章", "约 20 小时"], snip: "从第一条输入文件，到发表级工作流：15 章、119 节的完整路线。" }) +
-        noteRow({ title: "学习看板", href: "#/board", on: r.path === "board", meta: ["15 章", "进度"], snip: "六列卡片摊开全部章节：已读、未读一眼看到，点卡片直接读。" });
+      rows = noteRow({ title: "学习路线 · 开始使用", href: "#/", on: !r.path, meta: ["置顶", BOOK_TOTAL + " 章", "约 20 小时"], snip: "从第一条输入文件，到发表级工作流：" + BOOK_TOTAL + " 章、" + SECTION_COUNT + " 节的完整路线。" }) +
+        noteRow({ title: "学习看板", href: "#/board", on: r.path === "board", meta: [BOOK_TOTAL + " 章", "进度"], snip: "按部分摊开全部章节：已读、未读一眼看到，点卡片直接读。" });
     } else if (f === "appendix") {
       title = "附录与工具";
       rows = APPENDIX_PAGES.map((p) => noteRow({
@@ -432,9 +434,9 @@
     let h = '<article class="page-note">';
     h += '<div class="home-hero"><div class="kicker">AIMD 与 CP2K 讲义 · 官方手册逐条对照 · 全部离线</div>' +
       "<h1>从第一行输入文件，到跑得动的科研计算</h1>" +
-      '<p class="lede">15 章中文课程，按六个文件夹组织成一本备忘录：每章给目标、给可运行输入、给自测，参数与默认值都能回到官方手册原页。' +
+      '<p class="lede">' + CHAPTERS.length + " 章中文课程，按 " + PART_GROUPS.length + " 个文件夹组织成一本备忘录：每章给目标、给可运行输入、给自测，参数与默认值都能回到官方手册原页。" +
       "适合第一次用 CP2K 做表面/水/电催化模拟的人，也适合把 AIMD 从入门推到发表级工作流。</p>" +
-      '<div class="home-stats"><span><b>' + CHAPTERS.length + '</b>章</span><span><b>' + SECTION_COUNT + '</b>节</span><span><b>107</b>段代码</span><span><b>' + kws + '</b>关键词</span><span><b>' + pages + '</b>页手册索引</span></div>';
+      '<div class="home-stats"><span><b>' + CHAPTERS.length + '</b>章</span><span><b>' + SECTION_COUNT + '</b>节</span><span><b>' + CODE_COUNT + '</b>段代码</span><span><b>' + kws + '</b>关键词</span><span><b>' + pages + '</b>页手册索引</span></div>';
     h += "</div>";
 
     h += '<div class="goals"><h2>开始之前，先确认三件事</h2><ul>' +
@@ -442,7 +444,7 @@
       "<li>你想算的是周期性体系（表面、液体、晶体）——这是课程练习的主线；孤立分子同样适用。</li>" +
       "<li>你愿意按「输入 → 运行 → 读输出 → 改参数」的节奏走，而不是先背完所有关键词。</li></ul></div>";
 
-    h += '<h3 style="margin-top:26px">六段路线</h3><div class="home-route">' + rows + "</div>";
+    h += '<h3 style="margin-top:26px">' + PART_GROUPS.length + ' 段路线</h3><div class="home-route">' + rows + "</div>";
 
     h += '<h3>5 分钟跑通第一个计算</h3><p>已经有可用的 <code>cp2k.psmp</code> 时，把右边的输入存成 <code>h2o.inp</code>，运行 <code>cp2k.psmp -i h2o.inp -o h2o.out</code>，然后在输出里搜 <code>ENERGY|</code>。每一行在做什么，第 4 章逐层拆开。</p>';
     h += '<div class="code"><div class="code-head"><span class="lang">cp2k</span><span class="code-title">h2o.inp — 第一个 CP2K 计算</span><button class="copy-btn" type="button">复制</button></div><pre><code>' + heroSource + "</code></pre></div>";
@@ -478,7 +480,7 @@
       return '<section class="bcol" data-part="' + esc(g.p) + '"><header class="bcol-h"><span>' + esc(g.p) + "</span><em>" + d + "/" + g.list.length + "</em></header>" +
         '<div class="bcards">' + g.list.map(bcard).join("") + "</div></section>";
     }).join("");
-    return pageHead("学习看板", "把 15 章摊成六列：哪章读过、哪章还没动，一眼看到。点卡片直接读，右上角可按状态筛。") +
+    return pageHead("学习看板", "把 " + BOOK_TOTAL + " 章摊成 " + PART_GROUPS.length + " 列：哪章读过、哪章还没动，一眼看到。点卡片直接读，右上角可按状态筛。") +
       '<div class="board-bar"><div class="board-stat"><b>' + done + "</b><span>/ " + CHAPTERS.length + " 章已读</span></div>" +
       '<div class="board-progress"><i style="width:' + Math.round((done / Math.max(1, CHAPTERS.length)) * 100) + '%"></i></div>' +
       '<div class="board-filter" id="board-filter"><button class="on" data-f="all" type="button">全部</button>' +
@@ -964,7 +966,7 @@
       initBoard();
     } else if (r.path === "about") {
       view.innerHTML = pn(pageHead("关于本站", "内容来源、演示说明与离线用法。") +
-        "<h3>内容从哪来</h3><p>课程主线来自《庚子计算 · AIMD 与 CP2K》讲义 1–5（PDF 转文本后重新组织），并整合了课程资料包里的 howto、专题讲义与真实练习输入（Au-H2O、Cu(100)+水、Au/TiO₂、QM/MM 元动力学、packmol 建模）。参数、默认值与语法边界以 <a href=\"https://manual.cp2k.org/trunk/\" target=\"_blank\" rel=\"noopener\">CP2K 官方手册（trunk 版）</a>为准：抓取了其中 3093 个页面（123 个方法/安装/教程页 + 2970 个输入参考页）。全站重编为 15 章中文课程，每章末尾的「来源」列出对应的讲义与手册页；关键词速查与手册地图直接由抓取数据生成。</p>" +
+        "<h3>内容从哪来</h3><p>课程主线来自《庚子计算 · AIMD 与 CP2K》讲义 1–5（PDF 转文本后重新组织），并整合了课程资料包里的 howto、专题讲义与真实练习输入（Au-H2O、Cu(100)+水、Au/TiO₂、QM/MM 元动力学、packmol 建模）。参数、默认值与语法边界以 <a href=\"https://manual.cp2k.org/trunk/\" target=\"_blank\" rel=\"noopener\">CP2K 官方手册（trunk 版）</a>为准：抓取了其中 3093 个页面（123 个方法/安装/教程页 + 2970 个输入参考页）。全站重编为 17 章中文课程，每章末尾的「来源」列出对应的讲义与手册页；关键词速查与手册地图直接由抓取数据生成。</p>" +
         "<h3>哪些是「示意」</h3><p>交互演示里的 SCF 收敛曲线、MD 恒温器、CUTOFF 网格分配都是教学模型：它们遵循手册里的定性规律（多层网格、DIIS/OT 的收敛速度、恒温器对温度的控制），但不是真实求解器，不能用来预测具体数值。正文中凡引用具体数值，都标明来自手册示例或需要自测。</p>" +
         "<h3>使用与许可</h3><p>站点代码（HTML/CSS/JS 与构建脚本）可自由用于学习与教学；手册文本与关键词说明版权归 CP2K 项目，按其许可使用；CP2K 本身是 GPLv2。示例在 Linux + cp2k.psmp 下验证语法，但不同版本、不同基组/赝势文件可能导致结果差异——正式计算前请以官方手册为准。</p>" +
         "<h3>怎么离线用</h3><p>把整个目录拷到任何机器，双击 <code>index.html</code> 即可。不需要联网，也不依赖任何 CDN。搜索用 <code>Ctrl K</code>，打印用顶栏的打印按钮（会去掉侧栏和按钮，只留正文）。</p>" +

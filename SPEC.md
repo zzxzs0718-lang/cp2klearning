@@ -121,9 +121,11 @@
 | ch10 | 频率、振动光谱与 TRAVIS | 结构与振动 | VIBRATIONAL_ANALYSIS、虚频、IR/Raman、热化学、TRAVIS 工作流 | lecture_4、travis pdf |
 | ch11 | AIMD 实战：系综、温控、约束与续算 | 动力学与自由能 | &MD、NOSE/CSVR/GLE、ASPC、重启、约束 MD、能量守恒、Au-H2O 案例 | lecture_4、练习 Au-H2O |
 | ch12 | 增强采样与自由能面 | 动力学与自由能 | blue-moon/PMF、slow-growth、metadynamics、COLVAR/HILLS、收敛判断、meta-qmmm | lecture_4/5 |
-| ch13 | 轨迹与电子结构分析 | 分析与实战 | RDF/MSD、cp2k2gro、DOS/PDOS、电荷/ELF/MO/静电势/功函数、能带 | lecture_4、练习 Au-TiO2 |
-| ch14 | 表面+水与 QM/MM 案例 | 分析与实战 | slab 与真空、水盒界面、Au-H2O/cuh2o/Au-TiO2 案例、QM/MM、GENMIX | 练习全部输入 |
-| ch15 | 发表级工作流 | 分析与实战 | 收敛证据链、误差预算、可复现、性能布局、方法段模板、错误速查 | lecture_2/3、旧 ch19–21 |
+| ch13 | 轨迹后处理：xyz、RDF、MSD 与扩散 | 后处理 | 轨迹来源与格式、VMD 周期处理与几何测量、势能涨落、RDF 与配位数、MSD 与 Arrhenius、VACF 与振动谱、密度剖面、cp2k2gro | lecture_1/4、练习 Au-H2O |
+| ch14 | 电子结构后处理：cube、Bader、PDOS 与功函 | 后处理 | E_DENSITY/SPIN_DENSITY、差分电荷与平面平均、Bader/Mulliken/Löwdin/Hirshfeld、PDOS 与展宽、ELF、MO cube、V_HARTREE 与功函数、VESTA 出图 | lecture_4、manual dos/population/MO |
+| ch15 | 光谱与自由能后处理：TRAVIS、HILLS、PMF | 后处理 | Wannier 中心与 TRAVIS 红外、Raman 边界、HILLS 与 gaussian.py 重加权、slow-growth/blue-moon、收敛与误差 | lecture_4/5、travis 讲义 |
+| ch16 | 表面+水与 QM/MM 案例 | 实战 | slab 与真空、水盒界面、Au-H2O/cuh2o/Au-TiO2 案例、QM/MM、GENMIX | 练习全部输入 |
+| ch17 | 发表级工作流 | 实战 | 收敛证据链、误差预算、可复现、性能布局、方法段模板、错误速查 | lecture_2/3、旧 ch19–21 |
 
 ## 7. 术语统一（首次出现给英文）
 
@@ -154,9 +156,11 @@
 - ch10：`methods__properties__infrared`、`raman`、`CP2K_INPUT/MOTION/VIBRATIONAL_ANALYSIS`
 - ch11：`methods__sampling__molecular_dynamics`、`CP2K_INPUT/MOTION/MD`
 - ch12：`methods__sampling__metadynamics`、`methods__sampling__constrained_dynamics`
-- ch13：`methods__electronic_structure__dos`、`band__index`、`population__index`、`molecular_orbitals`
-- ch14：`methods__qm_mm__index`、`builtin`、`CP2K_INPUT/FORCE_EVAL/QMMM`
-- ch15：`getting-started__troubleshooting`、`technologies__eigensolvers__index`、`elpa`
+- ch13：`methods__sampling__molecular_dynamics`、`CP2K_INPUT/MOTION/MD/REFTRAJ`、`methods__properties__infrared`
+- ch14：`methods__electronic_structure__dos`、`band__index`、`population__index`、`molecular_orbitals`、`methods__electronic_structure__fod`
+- ch15：`methods__sampling__metadynamics`、`methods__properties__infrared`、`raman`、`methods__sampling__constrained_dynamics`
+- ch16：`methods__qm_mm__index`、`builtin`、`CP2K_INPUT/FORCE_EVAL/QMMM`
+- ch17：`getting-started__troubleshooting`、`technologies__eigensolvers__index`、`elpa`
 
 课程练习（真实输入/输出，`D:\夸克\AJ41-CP2K课程\练习\`）：`Au-H2O`（AIMD + RDF）、`cuh2o`（OT vs 对角化）、`Au-TiO2`（DFT+U + rdf/rmsd）、`h2o`（cp2k/vasp 对照）、`meta-qmmm`（2936 原子 QM/MM 元动力学）、`packmol`（混合体系）、`metadynamics`。
 

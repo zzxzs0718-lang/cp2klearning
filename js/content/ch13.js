@@ -1,429 +1,595 @@
 (function () {
   window.CONTENT = window.CONTENT || {};
   window.CONTENT["ch13"] = {
-    id: "ch13", num: 13, part: "分析与实战",
-    title: "轨迹与电子结构分析",
-    subtitle: "从 cp2k.out、cp2k-pos-1.xyz 和 cube 文件里，把数字变成图",
-    hours: 6.0, level: "高级",
-    intro: "算完不算完。一次 AIMD 跑完，磁盘上留下的是几万帧坐标、一个 .ener 文件、几个 cube 文件，而论文要的是 RDF 曲线、扩散系数、差分电荷密度和态密度图。本章讲的就是中间这一段：**哪些文件对应哪个物理量、用什么命令把它取出来、取出来之后怎么判断结果可信**。全部示例来自「庚子计算 CP2K 课程」的练习文件与讲义（Au-H2O、cuh2o、Au-TiO2 三个体系），不是官方教程；数值能引用的都注明出处，没有把握的地方会说明判断方法而不是给一个数字。",
+    id: "ch13",
+    num: 13,
+    part: "后处理",
+    title: "轨迹后处理：从 xyz 到曲线",
+    subtitle: "把 cp2k-pos-1.xyz 变成 RDF、MSD、扩散系数和密度剖面",
+    hours: 3.0,
+    level: "高级",
+    intro: "一次 AIMD 跑完，目录里最占地方的是 cp2k-pos-1.xyz，而它本身只是一堆坐标。这一章把这些坐标变成 RDF、MSD、扩散系数、振动谱和密度剖面——判断体系对不对，靠的就是这几条曲线。电子结构交给第 14 章，振动、热化学与自由能交给第 15 章。",
     goals: [
-      "分清 cp2k-pos-1.xyz、cp2k-1.ener、cp2k-1.restart、cube 文件各自承载什么信息",
-      "会用 cp2k2gro.py 把轨迹转成 gro，交给 VMD / GROMACS / TRAVIS 做后处理",
-      "能从轨迹算出径向分布函数、配位数、均方位移与扩散系数，并说清拟合区间怎么选",
-      "会输出电荷密度、差分电荷密度、ELF、分子轨道、静电势 cube，并从中读出功函数",
-      "理解 Mulliken / Hirshfeld / Löwdin / Bader 原子电荷的差别，知道哪些数可以比、哪些不能比"
+      "打开 &MOTION%&PRINT 里的轨迹、速度与 restart 三个开关，并算清一条轨迹要吃掉多少磁盘。",
+      "在 VMD 里设盒子、wrap、建多帧表示，量键长键角，并知道 RDF 与 MSD 对 pbc 的顺序要求正好相反。",
+      "从轨迹算出 RDF 与配位数、多参考帧 MSD 与扩散系数、VACF 与振动谱。",
+      "沿 z 做密度剖面看懂固液界面，并说出每一步顺序搞错会得到什么假结果。"
     ],
     sections: [
       {
-        id: "13.1", title: "分析地图：从输出文件到一张图",
+        id: "13.1",
+        title: "这一章在整门课里的位置",
         blocks: [
-          { type: "p", text: "CP2K 的分析工作可以分成两条互不干扰的线。**第一条是轨迹线**：MD 跑完得到坐标随时间的演化，问的是结构问题——水在表面怎么排、氢键网络什么样、分子扩散多快。**第二条是电子结构线**：对某个（或某几个）结构做单点，输出电荷密度、轨道、态密度，问的是电子问题——电荷往哪转移、键是什么性质、功函数多大。" },
-          { type: "p", text: "两条线的入口不同：轨迹线的入口是 `cp2k-pos-1.xyz`，电子结构线的入口是 `&PRINT` 段里那几个 cube / pdos / mulliken 子段。出口也不同：轨迹线通常走向 TRAVIS、GROMACS、VMD；电子结构线走向 VESTA、Origin。中间那一步「把文件变成能画的数据」，才是最容易卡住的地方。" },
+          {
+            type: "p",
+            text: "一次水盒子的 AIMD 跑完，工作目录里最有价值的是两个文件：`cp2k-1.ener` 记能量与温度，`cp2k-pos-1.xyz` 记每一帧的坐标。前者几百 KB，后者几十到几百 MB。本章从后一个文件出发，把结构信息变成四类曲线：径向分布函数、均方位移与扩散系数、振动谱、密度剖面。"
+          },
           {
             type: "table",
-            caption: "一次 MD 计算会留下的文件，以及它们各自能回答什么",
-            head: ["文件", "内容", "用途"],
+            head: ["产物", "典型文件", "常用工具", "去哪一章"],
             rows: [
-              ["cp2k-pos-1.xyz", "每帧原子数 + 注释行（步号、时间、能量）+ 坐标", "轨迹分析的总入口：RDF、MSD、氢键、可视化"],
-              ["cp2k-vel-1.xyz", "速度轨迹（Bohr/a.u. 时间）", "振动谱、速度自相关；转 gro 时可一并带上"],
-              ["cp2k-1.ener", "每步的动能、温度、势能、守恒量、耗时", "检查温度是否守住、能量是否漂移"],
-              ["cp2k-1.cell", "每步晶胞（NPT 才有意义）", "转 gro 时给盒子；NVT 用固定 CELL 文件即可"],
-              ["cp2k-1.restart", "可直接续算的完整输入", "断点续算的起点"],
-              ["cp2k-RESTART.wfn", "波函数/密度矩阵", "续算时跳过 SCF 初猜"],
-              ["cp2k-cube-ELECTRON_DENSITY-1_0.cube", "电子密度（格点）", "差分密度、Bader 电荷、范德华表面着色"],
-              ["cp2k-hartree-v_hartree-1_0.cube", "静电势（格点）", "功函数、异质结能带对齐"],
-              ["cp2k-elf-ELF_S1-1_0.cube", "电子定域化函数", "成键性质、孤对电子、多中心键"],
-              ["cp2k-ALPHA_k1-1.pdos", "按原子/角动量投影的态密度", "分析杂化与电荷转移"],
-              ["cp2k-Mulliken-1.mulliken", "Mulliken 原子电荷", "同一方法内部的电荷趋势比较"]
+              ["轨迹与速度", "cp2k-pos-1.xyz、cp2k-vel-1.xyz", "VMD、TRAVIS、自己的脚本", "第 13 章（本章）"],
+              ["能量与温度的时间序列", "cp2k-1.ener", "grep 提取后 Origin 作图", "第 13 章"],
+              ["电荷密度、DOS、能带", "cube 文件、cp2k.out 里的 pdos 段", "VMD、Multiwfn", "第 14 章"],
+              ["频率、热化学、自由能面", "cp2k.out、HILLS 与 COLVAR", "molden、VMD、Origin", "第 15 章"]
             ]
-          },
-          { type: "h3", text: "一条稳定的六步流程" },
-          {
-            type: "steps",
-            items: [
-              { t: "先看 .ener 和 out", d: "温度曲线是否绕着设定值波动、SCF 是否每步都收敛、有没有 WARNING。这一步不通过，后面的图都不用画。" },
-              { t: "确认轨迹完整", d: "原子数 × 帧数 + 2 × 帧数 应等于文件行数；末帧时间要等于 STEPS × TIMESTEP（课程 Au-H2O 是 100000 × 0.5 fs，末帧 time = 2151 fs，说明中途有重启接续）。" },
-              { t: "丢掉预热段", d: "课程讲义的做法是分析时丢掉前 1/3 轨迹，只统计平衡后的部分。" },
-              { t: "选工具", d: "RDF、MSD、振动谱优先 TRAVIS；需要 GROMACS 的分析命令就先转 gro；纯几何统计可以写几十行 Python。" },
-              { t: "单点补电子结构", d: "取一帧代表性结构（不是第一帧），在同一套泛函/基组/截断下做单点，输出 cube 与 pdos。" },
-              { t: "核对量纲", d: "cube 里是原子单位，gro 里是 nm，pdos 的能量是 a.u.，MD 时间是 fs。混用单位是这类分析最常见的错误来源。" }
-            ]
-          },
-          { type: "demo", id: "units" },
-          { type: "callout", kind: "note", title: "本章的数据来源", text: "轨迹、RDF/RMSD 曲线、电荷密度设置均取自「庚子计算 CP2K 课程」练习目录（`练习/Au-H2O`、`练习/Au-TiO2`、`练习/cuh2o`）与其讲义；手册页作为关键词依据。个案数值只代表那套设置，不是普适推荐值。" }
-        ]
-      },
-      {
-        id: "13.2", title: "轨迹文件：xyz 的结构与格式转换",
-        blocks: [
-          { type: "p", text: "`cp2k-pos-1.xyz` 是标准扩展 XYZ：第一行原子数，第二行注释，之后每行一个原子。注释行不是装饰，很多后处理脚本（包括课程里的 `zdistr.py`、`cp2k2gro.py`）都从里面读时间。CP2K 的注释行长这样：`i = 4302, time = 2151.000, E = -3366.8465934426`——按空格切开后第 6 个字段是时间（`2151.000,`），带一个逗号，脚本用 `float(info[5].strip(','))` 去掉那个逗号。" },
-          {
-            type: "code", lang: "bash", title: "先确认文件结构：头四行 + 能量列",
-            text: `head -4 cp2k-pos-1.xyz
-# 198                        <- 原子数
-# i = 0, time = 0.000, E = -3365.7933150126
-# H  8.6700000000  2.3300000000 20.5000000000
-# ...
-
-head -3 cp2k-1.ener
-# Step Nr. Time[fs] Kin.[a.u.] Temp[K] Pot.[a.u.] Cons Qty[a.u.] UsedTime[s]
-#     0      0.000000    0.000000000   330.000     -3365.793315   ...
-#     1      0.500000    0.031234567   329.980     -3365.793421   ...`
-          },
-          { type: "p", text: "`.ener` 的列顺序在 CP2K 里是固定的：步号、时间（fs）、动能（a.u.）、温度（K）、势能（a.u.）、守恒量（a.u.）、本步耗时（s）。NVT 下守恒量一列会因为恒温器注采能量而**不严格守恒**，所以看漂移要看势能加动能的总和，而不是只看 Cons Qty。Au-TiO2 那份 `cp2k-1.ener` 的首行表头就是这一串列名，首步温度正好是 600.000000000 K——那是初始速度按设定温度生成的结果。" },
-          { type: "h3", text: "转成 gro：交给 GROMACS 和 VMD" },
-          { type: "p", text: "VMD 能直接读 xyz，但盒子信息要靠 pbc set 手动给；GROMACS 的分析工具（`gmx rdf`、`gmx msd`、`gmx hbond`）只认 trr/xtc/gro。课程包里附的 `cp2k2gro.py` 就是干这件事的：读 xyz 与晶胞，逐帧写 gro（坐标除以 10 变成 nm，时间除以 1000 变成 ps）。" },
-          {
-            type: "code", lang: "bash", title: "转轨迹（NVT 用 CELL 文件，NPT 用 cp2k-1.cell）",
-            text: `# NVT：把盒子写进 CELL（两行：A B C / ALPHA BETA GAMMA，单位 Å）
-# 8.6507 9.9899 31.000
-# 90.0 90.0 90.0
-
-python cp2k2gro.py -x cp2k-pos-1.xyz -c CELL -f au_h2o.gro
-# 有速度轨迹时一并转换（速度按 Bohr/a.u. 时间读入）
-python cp2k2gro.py -x cp2k-pos-1.xyz -v cp2k-vel-1.xyz -c CELL -f au_h2o.gro
-
-# 之后就可以用 GROMACS 的分析命令（选择组用 selection 语法指定）
-gmx rdf -f au_h2o.gro -s au_h2o.tpr \\
-        -ref "name Au" -sel "resname SOL" -o rdf_au_o.xvg`
-          },
-          { type: "callout", kind: "warn", title: "脚本附带的 mdp/top 不能直接用来做模拟", text: "`cp2k2gro.py -a` 会顺手生成 `.mdp` 和 `.top`，但脚本自己在 top 文件开头写了 `WARNING, it cannot be used for a simulation.` 这句——它的用途是让 `grompp` 能跑通、把 gro 包成一个 tpr，方便用 GROMACS 的分析工具；真做 MM 模拟必须换成自己的力场参数。" },
-          { type: "p", text: "工具箱的分工建议：**VMD** 看轨迹、做氢键和距离测量；**OVITO** 看大体系的配位环境与多面体；**GROMACS** 做定量分析（rdf/msd/hbond，命令成熟、有现成教程）；**TRAVIS** 做与 CP2K 配套的光谱与统计（专门为 CP2K 的 MD 设计）；**Origin** 画最终曲线。" }
-        ]
-      },
-      {
-        id: "13.3", title: "径向分布函数与配位数",
-        blocks: [
-          { type: "p", text: "径向分布函数 g(r) 回答的是「以某个原子为中心，半径 r 到 r+dr 的球壳里，找到另一类原子的概率是均匀分布的多少倍」。均匀分布时 g(r)=1；第一峰的位置就是最近邻距离，峰的尖锐程度说明结构有序程度，长程趋于 1 说明液体失去了长程序。" },
-          { type: "p", text: "算 g(r) 需要三样东西：**成对的定义**（哪些原子算中心、哪些算邻居）、**密度归一化**（体相用 N/V，slab 体系只算吸附层区域，别把真空层算进体积）、**方向处理**（表面体系要区分面内与本征法向）。第三点最容易被忽略：把 slab 当成各向同性液体去算，得到的 g(r) 会被真空层稀释。" },
-          { type: "p", text: "课程练习里 Au-TiO2 的 `rdf/` 目录给了一组成品曲线，五条分别是 Au–Au、Au–Au（界面处）、Au–O、Au–Ti、Ti–O。数据格式很朴素：两列，第一列距离、第二列 g(r)，从 0.01 Å 起、步长 0.02 Å，前几行 g(r)=0 那段对应「比最近邻还近，不可能有原子」。这套曲线是用后处理脚本从轨迹里统计出来的（同目录还放着 Origin 工程文件 `UNTITLED.opj`），不是 CP2K 内置打印的。" },
-          {
-            type: "code", lang: "bash", title: "两条可用路线：TRAVIS 交互式，或课程自带的 Python 脚本",
-            text: `# 路线一：TRAVIS（专门为 CP2K 轨迹写的后处理程序）
-travis -p cp2k-pos-1.xyz
-#   交互式选择要算的量（rdf / msd / 光谱等），再指定帧间隔
-#   （0.5 fs 的轨迹取每一帧；文件大时可以每隔几帧取一帧）
-#   输出可直接进 Origin 的 csv
-
-# 路线二：课程脚本，按帧抽取某个元素的 z 坐标（做密度分布/层间分布）
-python zdistr.py cp2k-pos-1.xyz O     # 生成 distance-O.xyz
-python zdistr.py cp2k-pos-1.xyz H     # 生成 distance-H.xyz`
-          },
-          { type: "p", text: "配位数是把 g(r) 积分到第一峰后的第一个极小值：`n = 4πρ ∫ r² g(r) dr`，其中 ρ 是邻居原子的数密度。手工做的时候注意三点：积分上限取**第一极小**而不是峰顶；ρ 要用同一区域的数密度；表面体系最好先按层切片再积分，否则第一层水的配位数会被第二层污染。" },
-          {
-            type: "table",
-            caption: "看 g(r) 曲线时先问这四个问题",
-            head: ["观察到的现象", "物理含义", "常见误判"],
-            rows: [
-              ["第一峰位置 2.8 Å 左右", "O–O 最近邻距离（氢键）", "把 H–O 峰当成 O–O 峰——先确认元素对"],
-              ["第一峰很高、第二峰清晰", "结构有序，接近固体/刚性溶剂化层", "峰高受统计帧数和 bin 宽度影响，不同设置不可直接比"],
-              ["g(r) 长时间不为 1", "归一化密度取错，或体系没达到平衡", "把未平衡段算进去，导致平台偏移"],
-              ["表面附近 g(r) 明显被压低", "真空层被算进体积，密度被稀释", "改用切片后的局部密度"]
-            ]
-          },
-          { type: "callout", kind: "tip", title: "统计量先问样本量", text: "g(r) 是系综平均，帧数太少时峰高会随取样抖动。判断方法很简单：把轨迹对半分，各算一次 g(r)，两条曲线在峰高上差多少，就知道你的误差棒有多长。讲义建议分析时丢掉前 1/3 轨迹，也是同一个道理——预热段的构型不代表平衡态。" }
-        ]
-      },
-      {
-        id: "13.4", title: "均方位移与扩散系数",
-        blocks: [
-          { type: "p", text: "均方位移 MSD 衡量的是「一个粒子从起点走了多远」：⟨|r(t) − r(0)|²⟩。在液体里，长时间极限下 MSD 对时间线性增长，斜率就是扩散系数。三维各向同性时用 6t 归一，二维（表面上的吸附层、膜内扩散）用 4t。" },
-          { type: "formula", tex: "D = \\frac{\\Delta r^{2}}{6t}", caption: "Δr² 为均方位移；表面/膜内二维扩散把 6 换成 4，只统计面内分量时用 4t 并对 xy 求平均" },
-          { type: "p", text: "**拟合区间是整个计算里最容易做错的一步**。MSD 曲线分三段：弹道段（很短，MSD ∝ t²）、线性段（真正的扩散）、平台段（被边界或吸附限制住）。只在线性段拟合，通常取曲线明显变直之后到开始弯曲之前。把平台段也塞进线性回归，斜率被拉平，扩散系数会被系统性低估；反过来只取前几个点，会落进弹道段，系数被高估。" },
-          { type: "p", text: "课程 Au-TiO2 练习的 `rmsd/` 目录放的是另一类量：金团簇相对自身质心的位移随时间的变化，按时间窗分成 `multiplot-0/250/500/750/1000.dat` 五组，第一列是时间（fs）、第二列是位移（Å），首行 `4.0 0.0405`，之后 8.0 fs 对应 0.0791 Å、12.0 fs 对应 0.1147 Å。这条曲线的用途不是算扩散系数，而是判断**团簇在模拟过程中有没有整体漂移**：如果几条时间窗的曲线彼此重合，说明统计窗口选得合理；如果后段的曲线整体抬高，说明体系在慢慢跑掉，需要检查固定层和真空层。" },
-          {
-            type: "code", lang: "bash", title: "用 GROMACS 算 MSD（先按 13.2 转成 gro）",
-            text: `# 选一组原子做 MSD；-mol 按分子统计，-rmcomm 去掉质心平动
-gmx msd -f au_h2o.gro -s au_h2o.tpr -n index.ndx \\
-        -sel "resname SOL" -mol -beginfit 5 -endfit 40 -o msd.xvg
-
-# 只统计面内扩散时先投影到 xy：用 trjconv 去掉 z 向涨落再算
-# 拟合区间由 -beginfit/-endfit（单位 ps）控制，先用默认值看曲线形状再调`
           },
           {
             type: "p",
-            text: "CP2K 的 AIMD 通常只有几到几十 ps，而 GROMACS 的 `-trestart` 默认是 10 ps：照默认值跑，整条轨迹只算成一段，误差棒大得没法用。**帧间隔是多少 ps，`-trestart` 就填多少**（0.5 fs = 0.0005 ps）。另一个必加的是 `-rmcomm`：CP2K 不自动移除质心平动，不去掉的话 MSD 里混进一个 t² 项，拟合出来的 D 偏大。",
+            text: "本章的写法统一：先给出能直接贴进终端的命令或输入，再解释每个参数在改什么。所有 shell 命令在 pwsh 与 bash 下通用，只有路径分隔符要按系统改。VMD 那几行属于 VMD 的 Tk Console（菜单 Extensions → Tk Console），不能粘到系统终端里。"
+          },
+          {
+            type: "p",
+            text: "后处理的前提是采样足够。MD 给出的是一条轨迹，你要的却是系综平均：时间上取够长，条件允许时再取几个独立副本。一条几皮秒的轨迹只落在一个局部构型上，偶尔还会碰上小概率事件，直接读出来的数就不能当结论。所以本章每一条曲线都带一个前提——先确认轨迹平衡了，再谈统计。"
+          },
+          {
+            type: "list",
+            items: [
+              "学会从 &MOTION%&PRINT 精确控制输出什么、每隔几步输出一次。",
+              "学会在 VMD 里把盒子设对、把分子贴回盒内、把多帧叠在一张图上。",
+              "学会用一条轨迹算出 RDF、配位数、MSD、扩散系数、VACF 和密度剖面。",
+              "学会判断一条轨迹到底平衡了没有，以及每一步顺序错了会出什么假峰。"
+            ]
+          },
+          {
+            type: "callout",
+            kind: "info",
+            title: "先把环境备齐",
+            text: "本章会用到 VMD（免费，需注册下载）、TRAVIS（可选，Linux 下编译）、Python 的 numpy。TRAVIS 不是必需品：RDF、MSD、VACF 都能用 numpy 自己算，本章给出的脚本就是第三条路。"
+          }
+        ]
+      },
+      {
+        id: "13.2",
+        title: "轨迹从哪里来：三个开关",
+        blocks: [
+          {
+            type: "p",
+            text: "CP2K 默认就会写 `cp2k-pos-1.xyz`，格式是 XMOL，也就是最常见的 xyz：第一行原子数、第二行注释、之后每行一个原子。它**不带晶胞信息**，所以 VMD 打开后看到的是散落的分子，需要你手动告诉它盒子多大。这一点在 13.3 会变成一条硬规则。"
+          },
+          { type: "h3", text: "一个能跑的水盒子" },
+          {
+            type: "p",
+            text: "上半是电子结构，写法与第 11 章完全一致，差别只在 `RUN_TYPE MD`。起始结构从 `start.xyz` 读：16 个水分子放进边长 7.82 Å 的立方盒，每个分子摊到约 30 Å³，对应密度 1 g/cm³ 左右。"
           },
           {
             type: "code",
-            lang: "bash",
-            title: "短轨迹的正确参数",
-            text: `# 每 5 步存一帧、TIMESTEP 0.5 fs -> 帧间隔 2.5 fs = 0.0025 ps
-gmx msd -f au_h2o.gro -s au_h2o.tpr -n index.ndx \\
-        -sel "resname SOL" -mol \\
-        -trestart 0.0025 -rmcomm \\
-        -beginfit 2 -endfit 6 -o msd.xvg
+            lang: "cp2k",
+            title: "h2o_md.inp（上半：电子结构）",
+            text: `&GLOBAL
+  PROJECT h2o_md
+  RUN_TYPE MD
+  PRINT_LEVEL LOW
+&END GLOBAL
 
-# -trestart = 每次重新计原点的间隔（ps），要等于帧间隔
-# -rmcomm    = 每帧先移除质心平动，去掉整体漂移
-# -beginfit/-endfit = 线性拟合窗口（ps），落在 MSD 的线性段`,
-          },
-          { type: "p", text: "CP2K 自己也能出 MSD：`&MOTION/&MD` 下的 `&REFTRAJ` 段可以做参考轨迹分析，其 `&MSD` 子段支持用 `DEFINE_REGION` 限定统计区域——这一条对 slab 上的水很有用，因为你不希望把真空层和固定层也算进去。具体子关键词随版本有差异，按手册页 `CP2K_INPUT/MOTION/MD/REFTRAJ/MSD` 填；日常更省事的做法仍是转 gro 交给 GROMACS，或者用 TRAVIS 的 msd 功能。" },
-          { type: "callout", kind: "warn", title: "扩散系数对时间步长和恒温器敏感", text: "同一个体系换恒温器（Nose 与 CSVR）或换时间步，D 可以差百分之几到十几。报数时把温度、恒温器类型、拟合区间、统计的分子数一起写出来；只写一个 D 值，别人无法复现也无法判断可信度。" }
-        ]
-      },
-      {
-        id: "13.5", title: "电荷密度：cube 文件、差分与平面平均",
-        blocks: [
-          { type: "p", text: "电子密度 cube 是所有电子结构分析的原料：差分电荷密度、Bader 电荷、范德华表面着色，都从它出发。输出只需要**单点计算**，把 `&PRINT` 里对应子段打开即可。默认 `STRIDE 2 2 2`（每两个格点取一个），文件小、图粗；`STRIDE 1 1 1` 全格点输出，图细但文件大好几倍。" },
-          {
-            type: "code", lang: "cp2k", title: "输出电子密度（放在 &FORCE_EVAL/&DFT/&PRINT 下）",
-            text: `&FORCE_EVAL
+&FORCE_EVAL
+  METHOD Quickstep
   &DFT
-    &PRINT
-      &E_DENSITY_CUBE
-        FILENAME cube
-        STRIDE 1 1 1
-      &END E_DENSITY_CUBE
-    &END PRINT
+    BASIS_SET_FILE_NAME BASIS_MOLOPT
+    POTENTIAL_FILE_NAME GTH_POTENTIALS
+    &MGRID
+      CUTOFF 400
+    &END MGRID
+    &SCF
+      SCF_GUESS ATOMIC
+      EPS_SCF 1.0E-6
+      MAX_SCF 30
+      &OT
+        MINIMIZER DIIS
+      &END OT
+    &END SCF
+    &XC
+      &XC_FUNCTIONAL PBE
+      &END XC_FUNCTIONAL
+    &END XC
   &END DFT
+  &SUBSYS
+    &CELL
+      ABC 7.82 7.82 7.82
+    &END CELL
+    &TOPOLOGY
+      COORD_FILE_NAME start.xyz
+      COORD_FILE_FORMAT XYZ
+    &END TOPOLOGY
+    &KIND H
+      BASIS_SET DZVP-MOLOPT-SR-GTH
+      POTENTIAL GTH-PBE-q1
+    &END KIND
+    &KIND O
+      BASIS_SET DZVP-MOLOPT-SR-GTH
+      POTENTIAL GTH-PBE-q6
+    &END KIND
+  &END SUBSYS
 &END FORCE_EVAL`
-          },
-          { type: "p", text: "跑完得到两个文件：`cp2k-cube-ELECTRON_DENSITY-1_0.cube`（电荷密度）与 `cp2k-cube-SPIN_DENSITY-1_0.cube`（自旋密度）。后缀里的 `1_0` 是自旋通道与迭代号。自旋密度对磁性体系（含过渡金属、缺陷态）才看得出信息：课程讲义里的例子是 Au/CeO2(111) 与 H-TiO2，前者电子从 Au 转移到表面 Ce，后者电子从 H 转移到表面 Ti——图上出现的就是自旋密度在哪个原子上鼓包。" },
-          { type: "h3", text: "差分电荷密度" },
-          { type: "p", text: "差分有两种定义，用到的是不同的问题。**片段相减**回答「A 和 B 放在一起时电荷怎么重新分布」，**形变密度**回答「这个体系里每个原子成键后电子云怎么变形」。" },
-          { type: "formula", tex: "\\Delta\\rho = \\rho_{AB} - \\rho_{A} - \\rho_{B}", caption: "片段相减：三次单点，几何结构完全相同，计算参数完全相同" },
-          {
-            type: "steps",
-            items: [
-              { t: "优化整体结构", d: "先对 AB 复合体系做几何优化，得到有意义的构型。" },
-              { t: "截取片段", d: "从优化好的结构里直接删掉另一片段，**不要再优化**，保证原子位置与复合体系逐位对齐。" },
-              { t: "三次单点", d: "AB、A、B 各算一次单点，泛函、基组、CUTOFF、盒子、k 点全部保持一致，各输出一个 cube。" },
-              { t: "相减", d: "AB 的 cube 减去 A 和 B 的 cube。VESTA 里依次导入三个文件做减法，或用自带脚本处理格点数据。" }
-            ]
-          },
-          { type: "p", text: "看三维等值面之外，**平面平均**往往更有说服力：把 xy 平面内的格点做平均，只留 z 方向的一维曲线，能量转移发生在哪一层一目了然。课程讲义给的做法是 `python ./cube.py <cube文件>`，三个 cube 各做一条线，相减就得到差分密度的平面平均曲线。" },
-          {
-            type: "code", lang: "bash", title: "平面平均与 Bader 预处理",
-            text: `# 三个 cube 各做一次 XY 平面平均，得到沿 z 的一维密度曲线
-python ./cube.py cp2k-cube-ELECTRON_DENSITY-1_0.cube
-
-# VESTA 里看三维等值面：
-#   1) 先导入 cp2k-cube-ELECTRON_DENSITY-1_0.cube（提供格点与晶胞）
-#   2) 再导入另外两个片段 cube，用 Edit -> Edit Data -> Subtract 做减法
-#   3) 等值面数值按体系大小调，一般从 ±0.002 e/Bohr^3 起试`
           },
           {
             type: "p",
-            text: "不想在图形界面里手工相减，可以走 CP2K 自带的 `cubecruncher`：它读 cube、做加减、按几何中心对齐，一条命令出结果，适合把差分步骤写进脚本、保证每次都用同一套参数。课程的综合练习（TiO₂ 表面吸附乙酸）就是这么做的。",
+            text: "下半是运动部分。NVT 加 Nosé–Hoover 是 AIMD 里用得最多的一种组合；`TIMECON` 是热浴与体系交换能量的时间常数，单位写 `[wavenumber_t]`，数值越大耦合越弱。步长 0.5 fs 的来历是：水 O–H 伸缩在 3300–3600 cm⁻¹，周期约 10 fs，取周期的 1/20。"
           },
           {
-            type: "code", lang: "bash", title: "cubecruncher：命令行做片段差分",
-            text: `# 1) 编译（源码在 CP2K 的 tools/cubecruncher 下）
-cp -r $CP2K/tools/cubecruncher .
-cd cubecruncher && make && cd ..
-
-# 2) 差分：复合体系 - 染料分子 - 表面
-cubecruncher.x -i MODE1-ELECTRON_DENSITY-1_0.cube \\
-              -subtract MODE1_dye-ELECTRON_DENSITY-1_0.cube -o tmp.cube
-cubecruncher.x -i tmp.cube \\
-              -subtract MODE1_slab-ELECTRON_DENSITY-1_0.cube \\
-              -center geo -o MODE1_delta.cube
-
-# 3) 直接在 VMD 里显示 MODE1_delta.cube 的等值面`,
+            type: "code",
+            lang: "cp2k",
+            title: "h2o_md.inp（下半：&MOTION）",
+            text: `&MOTION
+  &MD
+    ENSEMBLE NVT
+    TIMESTEP 0.5
+    STEPS 40000
+    TEMPERATURE 330.0
+    &THERMOSTAT
+      TYPE NOSE
+      &NOSE
+        TIMECON 1000
+      &END NOSE
+    &END THERMOSTAT
+  &END MD
+  &PRINT
+    &TRAJECTORY
+      &EACH
+        MD 5
+      &END EACH
+    &END TRAJECTORY
+  &END PRINT
+&END MOTION`
+          },
+          { type: "h3", text: "打印开关与磁盘预算" },
+          {
+            type: "p",
+            text: "`&EACH MD 5` 的意思是每 5 个 MD 步写一帧。步长 0.5 fs 时一帧 2.5 fs，上面那个 40000 步的输入正好 8000 帧、20 ps。想要自带晶胞的格式，把 FORMAT 换成 PDB，VMD 直接读得懂；想要 ASE、OVITO 认的格式用 EXTXYZ，手册对它的说明是 including cell information。"
+          },
+          {
+            type: "code",
+            lang: "cp2k",
+            title: "&MOTION%&PRINT：轨迹、速度、restart 一起开",
+            text: `&MOTION
+  &PRINT
+    &TRAJECTORY
+      FORMAT EXTXYZ
+      FILENAME h2o_traj
+      &EACH
+        MD 5
+      &END EACH
+    &END TRAJECTORY
+    &VELOCITIES
+      FORMAT XYZ
+      &EACH
+        MD 5
+      &END EACH
+    &END VELOCITIES
+    &RESTART_HISTORY
+      &EACH
+        MD 500
+      &END EACH
+    &END RESTART_HISTORY
+  &END PRINT
+&END MOTION`
+          },
+          {
+            type: "table",
+            head: ["文件名", "内容", "什么时候看它"],
+            rows: [
+              ["cp2k-pos-1.xyz", "每帧坐标，默认 XMOL 格式", "RDF、MSD、VMD 看动画"],
+              ["cp2k-vel-1.xyz", "每帧速度", "VACF、动能分解"],
+              ["cp2k-1.ener", "每步的 Kin.、Temp、Pot.、Cons Qty", "判断平衡、检查能量漂移"],
+              ["cp2k-1.restart", "最新一次续算文件", "中断后接着跑"],
+              ["cp2k-1_****.restart", "按 RESTART_HISTORY 间隔存的快照", "回头改参数重跑"]
+            ]
           },
           {
             type: "callout",
             kind: "tip",
-            title: "对齐比相减更重要",
-            text: "`-center geo` 会把两次计算的格点按几何中心对齐。如果三个片段的原子在盒子里位置不同（比如从复合体系里直接删原子、却重新居中了），格点就会错位，差出来的「密度」其实是平移误差。做法是：片段不重新居中，盒子与复合体系完全相同，只删原子。",
+            title: "磁盘预算怎么算",
+            text: "练习里 Au-H2O 那条 10 万步、0.5 fs 的轨迹，cp2k-pos-1.xyz 实际是 55836100 字节，五十多 MB。&EACH MD 从 1 改成 5，文件直接掉到五分之一；改成 10 再掉一半。另一大块是波函数：在 &DFT%&PRINT 里加 &RESTART OFF，能省掉每个 MD 步的波函数快照。"
           },
-          { type: "callout", kind: "warn", title: "差分图里混进基组误差的三种情况", text: "三次单点用了不同的盒子（片段单独算时缩小了 cell）、不同的 CUTOFF、或者片段没做鬼原子补偿——这三种都会让「差分」里混进基组重叠误差，看起来像电荷转移，其实只是基函数变了。做法是把三个计算的 cell 设成同一个（哪怕片段周围是空的），参数逐行一致，只在原子列表上做删减。" },
-          { type: "callout", kind: "tip", title: "等值面的正负要成对看", text: "差分密度有正有负：正值表示该区域电子聚集，负值表示电子减少。只画一个符号的等值面，等于只看了一半故事。VESTA 里给正负分别设颜色（讲义常用红/蓝），并在图注里写清「红 = 增加，蓝 = 减少」。" }
+          {
+            type: "p",
+            text: "`&MOTION%&MD%&REFTRAJ` 是另一条路：它不写轨迹文件，而是每步拿当前结构与一个参考轨迹逐帧比对，直接给出能量、力或均方位移。写的时候 `LAST_SNAPSHOT` 必须显式给出，否则运行到最后会报 Unexpected EOF；`WRAP` 默认 NONE，需要缠绕时明确写 POSITIVE 或 CENTRAL。"
+          },
+          {
+            type: "code",
+            lang: "cp2k",
+            title: "边跑边算：&REFTRAJ",
+            text: `&MOTION
+  &MD
+    &REFTRAJ
+      EVAL ENERGY
+      TRAJ_FILE_NAME h2o_traj.xyz
+      CELL_FILE_NAME h2o_traj.cell
+      WRAP CENTRAL
+      STRIDE 1
+      FIRST_SNAPSHOT 1
+      LAST_SNAPSHOT 4000
+    &END REFTRAJ
+  &END MD
+&END MOTION`
+          },
+          {
+            type: "demo",
+            id: "md",
+            title: "动手：采样间隔与时间步",
+            desc: "在 MD 演示里改 TIMESTEP 与 &EACH 的间隔，看总仿真时间、帧数与磁盘占用三者的取舍；再体会步长取到振动周期的 1/5 会怎样。"
+          }
         ]
       },
       {
-        id: "13.6", title: "原子电荷：Mulliken、Hirshfeld、Löwdin 与 Bader",
+        id: "13.3",
+        title: "VMD：先把盒子设对",
         blocks: [
-          { type: "p", text: "原子电荷的定义是「核电荷数减去分配给这个原子的电子数」。问题在于「分配」没有唯一答案：电子密度是连续分布的，把它切成原子的份额必须人为定规则。所以**不同方法给出的绝对值不可直接比较**，同一方法内部的趋势才是有意义的物理信息。" },
-          { type: "p", text: "CP2K 内置三种，一次单点就能全部输出：Mulliken 按基函数归属划分（对基组敏感，弥散函数会带来布居数问题）；Löwdin 先把基函数正交化再划分；Hirshfeld 按自由的原子密度在空间中的比例划分（对基组不敏感，但绝对值偏小）。Bader 不在 CP2K 里，要用 Henkelman 组的独立程序对 cube 文件做后处理，按电子密度零通量面划分原子盆。" },
           {
-            type: "code", lang: "cp2k", title: "三种内置原子电荷，一次单点全出",
-            text: `&FORCE_EVAL
-  &DFT
-    &PRINT
-      &MULLIKEN
-        SILENT
-        FILENAME Mulliken
-      &END MULLIKEN
-      &HIRSHFELD
-        SILENT
-        FILENAME hirshfeld
-      &END HIRSHFELD
-      &LOWDIN
-        SILENT
-        FILENAME lowdin
-      &END LOWDIN
-    &END PRINT
-  &END DFT
-&END FORCE_EVAL`
+            type: "p",
+            text: "打开轨迹的第一件事不是看分子，而是告诉 VMD 盒子有多大。xyz 里没有晶胞信息，VMD 默认按 1 Å 的盒子处理，于是分子被无数个周期镜像包围，RDF 立刻就错。三行命令的顺序决定后面所有分析对不对。"
           },
           {
-            type: "table",
-            caption: "同一个 CO/Ni(100) 体系，四种方法给出的净电荷（单位 e，讲义原表）",
-            head: ["方法", "Ni", "C", "O"],
-            rows: [
-              ["Bader（AIM）", "+0.06", "+1.64", "−1.86"],
-              ["Löwdin", "−0.062", "+0.239", "+0.138"],
-              ["Hirshfeld", "−0.630", "+0.947", "−0.240"],
-              ["Mulliken", "−0.327", "+0.443", "−0.076"]
+            type: "code",
+            lang: "bash",
+            title: "VMD 的 Tk Console（Extensions → Tk Console）",
+            text: `pbc set {7.82 7.82 7.82} -all
+pbc box
+pbc wrap -all
+display depthcue off
+color Display Background white
+display rendermode GLSL`
+          },
+          {
+            type: "p",
+            text: "把盒子的三个边长照抄 &CELL 里的 ABC，三斜或六方体系还要给出角度。`pbc box` 应该画出与轨迹一致的框。`pbc wrap -all` 把跨边界的分子贴回盒内：不 wrap 时你会看到水分子一半在盒子这边、一半在那边，动画像被刀切开，而且 RDF 里会出现假的小峰。如果轨迹是 13.2 里那种 EXTXYZ 或 PDB，盒子已经写在文件里，VMD 读入时会自己带上，这三行可以省；默认的 XMOL 没有盒子，就必须手动设。"
+          },
+          {
+            type: "steps",
+            items: [
+              "File → New Molecule 打开 cp2k-pos-1.xyz，格式选 XMOL。",
+              "Tk Console 里 pbc set {a b c} -all，再 pbc box 确认盒子与轨迹一致。",
+              "pbc wrap -all，把跨边界的分子贴回盒内。",
+              "Create Rep 建一个图层，Selected Atoms 写 element O 或 name H1 挑原子。",
+              "Graphics → Representations 里选画法，Trajectory 页勾 Draw Multiple Frames 叠多帧。"
             ]
           },
-          { type: "p", text: "这张表的重点不是哪个数「对」，而是四个方法连**符号**都不一致：Ni 在 Bader 下是 +0.06，在 Löwdin/Mulliken/Hirshfeld 下都是负的。原因在划分规则：Bader 按密度拓扑切盆，Ni 的 3d 电荷被算进自己的盆里就偏正；Mulliken/Löwdin 按基函数归属，Ni 的 d 轨道与 C/O 的基函数有重叠，重叠布居按一半一半分，方向就反过来了。写论文时的正确做法是：**只用一种方法画趋势图，在方法段注明用的是哪一种，绝不跨方法比较绝对值**。" },
           {
-            type: "code", lang: "bash", title: "Bader 电荷：先出 cube，再用外部程序划分",
-            text: `# 1) 单点计算，输出电子密度（见 13.5）
-# 2) 用 Bader 程序读 cube，得到 ACF.dat / BCF.dat / AVF.dat
-bader cp2k-cube-ELECTRON_DENSITY-1_0.cube
-
-# 3) ACF.dat 里第 5 列是原子盆内的电子数
-#    净电荷 = 价电子数 - 盆内电子数
-#    讲义例子：Ni 用 q18 基组 -> 18 - 17.94 = +0.06 e
-#              C  用 q4  基组 ->  4 - 2.36  = +1.64 e
-#              O  用 q6  基组 ->  7.86 - 6  = -1.86 e
-
-# 自旋布居同理：对自旋密度 cube 再跑一次 bader
-bader cp2k-cube-SPIN_DENSITY-1_0.cube`
+            type: "callout",
+            kind: "warn",
+            title: "两条顺序正好相反",
+            text: "RDF 要求先 pbc set，否则它按 1 Å 的默认盒子算镜像，第一个峰的位置就偏了。MSD 与 RMSD 反过来要求不要 wrap：wrap 会把真实的大位移折叠回盒内，位移被抹掉，扩散系数直接算小。讲义对这两条都有明确提醒，照着做能省掉一整轮重算。"
           },
-          { type: "callout", kind: "warn", title: "价电子数要对上赝势", text: "净电荷 = 价电子数 − 盆内电子数，这个「价电子数」由赝势决定，不是元素周期表上的总电子数。Ni 用 `GTH-PBE-q18` 就是 18，换成 q10 就会算错 8 个电子。做 Bader 前先把 `&KIND` 里的赝势名确认一遍。" },
-          { type: "callout", kind: "tip", title: "展宽体系下的 Mulliken 要谨慎", text: "开了 `&SMEAR` 之后轨道有分数占据，Mulliken 布居会把分数占据按权重摊到各原子上，数值随电子温度变化。金属体系做电荷分析时，优先用 Bader（基于总密度，与占据数无关），并把 `ELECTRONIC_TEMPERATURE` 固定住再比较。" }
+          {
+            type: "p",
+            text: "Selected Atoms 的写法值得背下来：`all`、`none`、`noh`（除氢之外）、`element O`、`name H1`、`index 0`（从 0 数）、`serial 1`（从 1 数）。量键长键角用鼠标在两个原子上各点一下（Graphics → Labels 里勾 bonds / angles），标记会留在图上，直接在 Graphics → Labels 里检阅并截图。"
+          },
+          {
+            type: "p",
+            text: "多帧叠加是讲义里最实用的一招：Create Rep 新建图层，在 Trajectory 页勾 Draw Multiple Frames，帧范围写成 `0:50:1000`，含义是起始 0、间隔 50、终止 1000。这样一次就能看出一千帧里结构是怎么演化的，比逐帧播放高效得多。"
+          },
+          {
+            type: "callout",
+            kind: "tip",
+            title: "出图与录屏",
+            text: "出图走 File → Render，选 Tachyon (internal, in-memory rendering)，分辨率写 2000×1500 左右就够。Windows 上录动画直接用 Win+G 录屏，比 VMD 自带的 movie maker 省事。"
+          }
         ]
       },
       {
-        id: "13.7", title: "态密度与投影态密度",
+        id: "13.4",
+        title: "RDF 与配位数",
         blocks: [
-          { type: "p", text: "态密度 DOS 把「有多少个能级落在 E 到 E+dE 之间」画成曲线。它回答的是电子结构问题里最实用的几个：费米能级附近有没有态（金属还是绝缘体）、带隙多宽、吸附分子与表面的轨道在哪个能量区间重叠（杂化）。" },
-          { type: "p", text: "两个前提必须满足。**金属/小带隙体系**要开 `&SMEAR`，否则分数占据无法处理、SCF 会震荡；**要画空带**就必须给 `ADDED_MOS`，因为 CP2K 默认只算占据轨道——空带数不够，费米能级以上就是空的，DOS 图在带边处会被硬生生截断。" },
           {
-            type: "code", lang: "cp2k", title: "总 DOS 与按原子投影的 PDOS",
-            text: `&FORCE_EVAL
-  &DFT
-    &PRINT
-      &DOS
-        &DOS
-          NLUMO -1
-        &END DOS
-      &END DOS
-      &PDOS
-        NLUMO -1
-        &LDOS
-          LIST 1..26
-        &END LDOS
-      &END PDOS
-    &END PRINT
-  &END DFT
-&END FORCE_EVAL`
-          },
-          { type: "p", text: "`&LDOS` 的 `LIST` 把若干原子合并成一组投影输出，`1..26` 表示前 26 个原子一起算——分析吸附分子时通常把分子的一组原子、表面第一层的一组原子分别合并，避免几十条曲线糊在一起。每个原子组会生成 `cp2k-ALPHA_k1-1.pdos`、`cp2k-BETA_k1-1.pdos` 这样的文件（自旋向上/向下各一个）。" },
-          { type: "p", text: "pdos 文件是纯文本，头部一行给出费米能与原子种类，之后每行是「轨道序号、本征值、占据数、s/p/d/f 投影」。讲义里给出的真实头部是 `# Projected DOS for atomic kind Ni1 at iteration step i = 0, E(Fermi) = 0.122425 a.u.`，列名是 `MO Eigenvalue [a.u.]  Occupation  s  p  d  f`。**费米能级就藏在这一行里**，也可以在 `cp2k.out` 里 `grep Fermi` 拿到。" },
-          {
-            type: "code", lang: "bash", title: "加高斯展宽后画图",
-            text: `# 原始的 pdos 只有离散能级，画成曲线前要加展宽
-# -s 0.01 是展宽宽度，具体单位以脚本内定义为准
-python new.py -s 0.01 cp2k-ALPHA_k26-1.pdos cp2k-BETA_k26-1.pdos > dos.txt
-
-# 费米能级（作图时对齐零点用）
-grep Fermi cp2k.out`
+            type: "p",
+            text: "径向分布函数 g(r) 回答一个问题：以 A 类原子为中心、半径 r 的球壳里，找到 B 类原子的概率，比理想气体高多少倍。它的第一峰位置就是最可几的键长或接触距离。"
           },
           {
-            type: "table",
-            caption: "DOS 图上的四种特征与它们的物理含义",
-            head: ["特征", "含义", "在催化/材料里的用法"],
-            rows: [
-              ["费米能级处 DOS 不为零", "金属性", "判断体系是否需要用 SMEAR + 空带"],
-              ["带隙中冒出小峰", "缺陷态或表面态", "定位多余电子/空穴落在哪个原子上"],
-              ["吸附后分子峰变宽、位置移动", "与表面杂化、电荷转移", "解释活化（如 CO 的 5σ 与 2π* 变化）"],
-              ["两个自旋通道不对称", "自旋极化", "磁性、单原子催化剂的电子结构分析"]
-            ]
+            type: "formula",
+            tex: "g_{AB}(r) = \\frac{V}{N_A N_B}\\cdot\\frac{1}{4\\pi r^2}\\sum_{i,j}\\delta(r_{ij}-r)",
+            caption: "除以 4πr² 是归一化到球壳体积；理想气体给 g(r)=1，第一峰位置就是最可几接触距离"
           },
-          { type: "callout", kind: "warn", title: "DOS 图不能直接读「电子数」", text: "DOS 的绝对值依赖展宽宽度与能量 bin：展宽调大，峰变矮变宽，曲线下面积不变但峰高不能互比。两张 DOS 图要放在一起比较时，两边的 `NLUMO`、展宽、能量零点（是否对齐费米能级）必须一致，并在图注里写清。" },
-          { type: "h3", text: "从 DOS 到能带：k 点与路径" },
-          { type: "p", text: "DOS 是**对整个布里渊区积分**之后的结果，能带图是**沿一条路径**的本征值。两者信息互补：DOS 告诉你「有没有态、在什么能量」，能带告诉你「这些态怎么随 k 变化」——带隙是直接还是间接、有效质量大不大、表面态是不是落进带隙里，只能从能带图上看出来。" },
-          { type: "p", text: "k 点的密度取决于你要的量。总能与小分子吸附能通常 2×2×1 到 4×4×1 就够（面内周期大，倒空间就小）；态密度与能带需要密得多的网格，因为要分辨费米面附近的细节。slab 体系的特点是 z 方向周期很长，所以 k 点网格的第三维取 1——这一点和体相计算完全不同。" },
           {
-            type: "code", lang: "cp2k", title: "面内 k 点网格（&DFT 下的 &KPOINTS）",
-            text: `&FORCE_EVAL
-  &DFT
-    &KPOINTS
-      SCHEME MONKHORST-PACK 6 6 1
-    &END KPOINTS
-  &END DFT
-&END FORCE_EVAL`
+            type: "p",
+            text: "VMD 里在 Extensions → Analysis → Radial Pair Distribution Function g(r) 打开插件，选两个元素、给最大距离和 bin 宽度、框住第 1 到最后一帧，就能出图。这个插件有个硬限制：只处理正交晶胞。"
           },
-          { type: "p", text: "上面是自洽计算用的网格（Monkhorst-Pack，三维各给一个数）。画能带要另做一次非自洽计算：在 `&DFT/&PRINT` 里打开 `&BAND_STRUCTURE`，按高对称点给出路径（面内 2D 方格的常用路径是 Γ → M → K → Γ），程序沿路径取一串 k 点，输出每条带的本征值。**`&BAND_STRUCTURE` 的子关键词随版本有差异**，具体写法以手册的能带章节为准，但要点固定：先用密网格自洽拿到密度，再沿路径做非自洽。" },
+          {
+            type: "callout",
+            kind: "warn",
+            title: "非正交盒子先转正交",
+            text: "六方、三斜体系要先用 Build → symmetry → Redefine lattice 转成正交超胞，例如石墨就是讲义里的例子。不转的话 g(r) 的第一个峰位置会整体偏，而且偏得看不出来——峰还在，只是距离不对。TRAVIS 支持多种盒型，可以拿它交叉验证一次。"
+          },
+          {
+            type: "p",
+            text: "TRAVIS 的用法是交互式的：一条命令进去，它逐个问题问你，方括号里是默认值，回车即接受。`-p` 后面跟轨迹，结果写在当前目录，日志固定叫 travis.log，同名文件不会被覆盖而是改名为 #1#output.txt。"
+          },
+          {
+            type: "code",
+            lang: "bash",
+            title: "用 TRAVIS 算 RDF",
+            text: `mkdir rdf && cd rdf
+travis -p ../cp2k-pos-1.xyz
+# 依次回答：RDF → 元素对 O O → 帧范围 1:1:4000 → 最大距离 8.0
+# 输出一组 CSV（分号分隔，文件名以 TRAVIS 实际写的为准），直接画
+xmgrace -block rdf_O-O.csv -bxy 1:2`
+          },
           {
             type: "table",
-            caption: "能带图上要读的四件事",
-            head: ["看什么", "怎么读", "常见错误"],
+            head: ["量", "讲义里的数值", "含义"],
             rows: [
-              ["带隙类型", "价带顶与导带底是否在同一 k 点", "只看一个 k 点就断言直接带隙"],
-              ["带隙宽度", "两段曲线的最小间距", "密度泛函低估带隙，别拿去和实验直接比"],
-              ["能带弯曲程度", "弯曲越小有效质量越大", "坐标轴单位没换算，把 a.u. 当成 eV"],
-              ["带隙中的平带", "缺陷态或表面态", "把 k 点不足造成的虚假平带当成真实表面态"]
+              ["水的 O–H 第一峰", "约 0.99 Å", "同一个分子内的共价 O–H 键"],
+              ["水的 O–H 第二峰", "约 1.73 Å", "邻近分子给出的氢键 H"],
+              ["第一配位层 H", "约 2.00 个", "每个 O 周围最近的 H 数目"],
+              ["第二配位层 H", "约 3.97 个", "对应每个 O 形成两个氢键"]
             ]
           },
-          { type: "p", text: "金属没有带隙，能带图的信息变成「哪条带穿过费米能级、在哪个方向色散强」——这直接对应导电与催化活性的各向异性。做金属表面时，路径选面内的 Γ → M → K → Γ 就够；沿 z 方向加路径对 slab 没意义，因为那个方向本来就是真空。" }
+          {
+            type: "p",
+            text: "配位数是把 g(r) 乘上体相数密度与球壳面积，从 0 积分到第一极小。水的 O–O g(r) 第一峰在 2.8 Å 附近（参考值，会随泛函、温压、势能面变动），积分到 2.8–3.0 Å 得到 4 左右，说明四配位网络是对的。如果得到 6 或 2，先查盒子设没设对。"
+          },
+          {
+            type: "p",
+            text: "g(r) 还能看化学键有没有形成：讲义里 Au 在完美 TiO₂ 表面上的 Ti–Au 曲线没有峰，换成有缺陷的表面，Au 团簇坍塌贴上去就出现键。同一套操作，换个元素对就是一次成键判断。"
+          }
         ]
       },
       {
-        id: "13.8", title: "ELF、分子轨道与静电势：成键性质与功函数",
+        id: "13.5",
+        title: "MSD 与扩散系数",
         blocks: [
-          { type: "p", text: "ELF（电子定域化函数）取值在 0 到 1 之间，衡量实空间中电子定域的强弱：ELF 接近 1 表示电子高度定域（共价键、孤对电子、内层电子、多中心键），接近 0 表示接近均匀电子气。经验判据是 **ELF > 0.5 的区域**就是成键或孤对电子的位置。它比分子轨道好用，因为轨道有相位和任意线性组合的问题，ELF 是密度泛函，与占据态一一对应。" },
-          { type: "p", text: "分子轨道 cube 用来画能级图与轨道形状，`NHOMO`/`NLUMO` 控制输出哪几条。**一般不需要 `-1` 全输出**：一个 200 原子的金属 slab 动辄几百条轨道，每条一个 cube 文件、体积几十 MB 起。只输出费米能级上下几条就够说明问题。" },
-          { type: "p", text: "静电势 cube 有两个用途：一是看分子表面的静电势分布（亲电/亲核位点），二是算功函数。功函数的定义是真空能级减费米能级：`Φ = E_vac − E_F`。做法是对 slab 的法向（通常 z）做平面平均，取真空区那段平台的平台值作为 E_vac，费米能级从 `grep Fermi cp2k.out` 或 pdos 头部读。" },
           {
-            type: "code", lang: "cp2k", title: "ELF、选择性输出的分子轨道、静电势（同一个 &PRINT 里）",
-            text: `&FORCE_EVAL
-  &DFT
-    SURFACE_DIPOLE_CORRECTION T
-    SURF_DIP_DIR Z
-    &PRINT
-      &ELF_CUBE
-        FILENAME elf
-        STRIDE 1 1 1
-      &END ELF_CUBE
-      &MO_CUBES
-        NHOMO 3
-        NLUMO 3
-        FILENAME MO
-        STRIDE 1 1 1
-      &END MO_CUBES
-      &V_HARTREE_CUBE
-        FILENAME hartree
-        STRIDE 1 1 1
-      &END V_HARTREE_CUBE
-    &END PRINT
-  &END DFT
-&END FORCE_EVAL`
+            type: "p",
+            text: "均方位移 MSD 度量的是「过了 t 之后，原子平均挪了多远」，取的是位移平方的平均。它和扩散系数之间是 Einstein 关系：长时间极限下 MSD 对时间是一条直线，斜率除以 6 就是三维扩散系数。"
           },
-          { type: "p", text: "输出文件名分别是 `cp2k-elf-ELF_S1-1_0.cube`（自旋向上；自旋极化体系还有 `ELF_S2`）、`cp2k-MO-WFN_00001_1-1_0.cube`（轨道号 + 自旋通道）、`cp2k-hartree-v_hartree-1_0.cube`。前两个直接进 VESTA 看等值面；第三个除了看三维分布，更常见的用法是做 z 方向的平面平均曲线，从曲线平台读真空能级。" },
-          { type: "formula", tex: "Φ = E_{\\mathrm{vac}} - E_{F}", caption: "功函数 = 真空能级 − 费米能级；真空能级取真空区静电势平台，单位换算 1 Ha = 27.2114 eV" },
-          { type: "p", text: "课程讲义给了一个完整的算例：某 slab 的真空区静电势平台是 0.3158 a.u.，费米能级是 0.12242 a.u.，两者相减 0.19338 a.u.，乘 27.2114 得 **5.26 eV**——这就是该表面模型在那一套设置下的功函数。同页讲义还强调了一句很关键的话：**真空层的静电势如果不平，说明 slab 上下表面不对称**，这时要么做偶极校正（`SURFACE_DIPOLE_CORRECTION T` + `SURF_DIP_DIR Z`），要么构造对称的 slab，否则算出来的 Φ 里混着一个人为的偶极场。" },
-          { type: "p", text: "看静电势分布还有一个进阶用法：异质结界面的能带对齐。两种材料接触后，各自的静电势平台会有高低差，电子从平台高的那一侧流向低的一侧；讲义举的例子是 TiO2/g-C3N4 异质结，两侧功函数分别 5.22 eV 与 6.43 eV，结论与差分电荷密度给出的电子转移方向一致——两条独立的证据指向同一个物理图像，这种互相印证比单一证据可靠得多。" },
+          {
+            type: "formula",
+            tex: "\\mathrm{MSD}(t) = \\frac{1}{N}\\sum_{i=1}^{N}|r_i(t)-r_i(0)|^2, \\  D = \\frac{1}{6}\\cdot\\frac{\\Delta MSD}{\\Delta t}",
+            caption: "6 是三维的来历：每个方向 MSD = 2Dt，三个方向加起来 6Dt"
+          },
+          {
+            type: "p",
+            text: "直接用第 0 帧当参考，曲线会抖得上翘不干净：AIMD 通常跑不到 100 ps，统计量太小。讲义的解法是取多帧当参考再平均——0、500、1000、1500、2000 帧各算一遍 MSD，加起来除以参考帧数。全帧平均太慢，还会把 VMD 卡死。"
+          },
+          {
+            type: "code",
+            lang: "python",
+            title: "msd.py：多参考帧平均",
+            text: `import sys
+import numpy as np
+
+def read_xyz(path):
+    frames = []
+    with open(path) as f:
+        while True:
+            head = f.readline()
+            if not head.strip():
+                break
+            n = int(head.split()[0])
+            f.readline()                              # 注释行
+            frames.append([[float(v) for v in f.readline().split()[1:4]]
+                           for _ in range(n)])
+    return np.array(frames)
+
+frames = read_xyz(sys.argv[1])
+dt = float(sys.argv[2])                # 每帧间隔，单位 ps
+nf, nat, _ = frames.shape
+
+refs = range(0, nf - 1, 500)           # 每 500 帧取一个参考帧
+msd = np.zeros(nf)
+cnt = np.zeros(nf)
+for r in refs:
+    d = frames[r:] - frames[r]
+    msd[:nf - r] += np.sum(d * d, axis=(1, 2)) / nat
+    cnt[:nf - r] += 1                  # 每个时刻实际有几个参考帧参与平均
+
+msd /= cnt
+for i in range(nf):
+    print("%.4f %.6f" % (i * dt, msd[i]))`
+          },
+          {
+            type: "p",
+            text: "用法是 `python msd.py cp2k-pos-1.xyz 0.0025`。第二个参数是每帧的时间间隔：&EACH MD 5、步长 0.5 fs，一帧就是 2.5 fs，换成 ps 是 0.0025。输出的两列是时间与 MSD，拿去 Origin 里线性拟合后半段，斜率就是 dMSD/dt。单位换算是 1 Å²/ps = 1e-4 cm²/s，扩散系数习惯写 cm²/s。"
+          },
           {
             type: "table",
-            caption: "分析工具的选择",
-            head: ["工具", "强项", "典型任务"],
+            head: ["T / K", "1000/T", "MSD 斜率 Å²/ps", "斜率/6 Å²/ps", "D cm²/s", "log(D)"],
             rows: [
-              ["VESTA", "cube 等值面、晶格面、表面着色", "差分电荷密度、ELF、静电势、自旋密度"],
-              ["OVITO", "大体系配位/多面体/缺陷识别", "几千原子的界面结构统计"],
-              ["VMD", "轨迹播放、氢键、距离测量", "水层结构、吸附构型快照"],
-              ["TRAVIS", "CP2K 轨迹的后处理与光谱", "RDF、MSD、IR/Raman 谱"],
-              ["GROMACS", "成熟的定量分析命令", "rdf/msd/hbond，需要先转 gro"],
-              ["Origin", "出版级作图", "所有曲线的最终排版"]
+              ["600", "1.6667", "0.44461", "0.0741017", "7.41017e-06", "-5.13017"],
+              ["800", "1.2500", "1.03847", "0.1730783", "1.73078e-05", "-4.76176"],
+              ["1000", "1.0000", "2.18712", "0.36452", "3.64520e-05", "-4.43828"],
+              ["1200", "0.8333", "3.61754", "0.6029233", "6.02923e-05", "-4.21974"],
+              ["1400", "0.7143", "4.36990", "0.7283167", "7.28317e-05", "-4.13768"]
             ]
+          },
+          {
+            type: "p",
+            text: "上表是讲义里的完整例子：Li₁₀GeP₂S₁₂ 在 600–1400 K 的五个温度点，每条模拟 80 ps，只用最后 60 ps 拟合。把 log(D) 对 1000/T 作直线，斜率等于 −Ea/(2303 kB)。分母里的 2303 不是笔误：横轴是 1000/T，比 1/T 多了一个 1000，而 2.303 又是 ln 与 log10 的换算，两个因子乘在一起。讲义这组数据的斜率是 −1.07871、截距 −3.35865，取 kB = 8.6173×10⁻⁵ eV/K，解出 Ea = 0.2141 eV。"
+          },
+          {
+            type: "formula",
+            tex: "\\log_{10} D = -\\frac{E_a}{2303\\,k_B}\\cdot\\frac{1000}{T} + C",
+            caption: "2303 = 2.303 × 1000：2.303 把 ln 换成 log10，1000 来自横轴用 1000/T"
+          },
+          {
+            type: "callout",
+            kind: "warn",
+            title: "算 MSD 之前不要 wrap",
+            text: "pbc wrap 会把越过边界的真实位移折叠回盒内，位移被抹掉，MSD 曲线会先平后上冲，扩散系数偏小。用 VMD 的 RMSD Trajectory Tool 也要注意勾上忽略前 N 帧，把预平衡那段丢掉——否则参考帧本身还在升温，曲线一开头就是假的大斜率。"
+          }
+        ]
+      },
+      {
+        id: "13.6",
+        title: "VACF 与振动谱",
+        blocks: [
+          {
+            type: "p",
+            text: "速度自相关函数 VACF 记录的是「t 时刻的速度还记得 0 时刻多少」。它随时间衰减，衰减快慢反映环境的阻尼：振得越慢，曲线越平缓。对所有帧做参考平均，才能把它平均干净。"
+          },
+          {
+            type: "formula",
+            tex: "C(t) = \\frac{1}{N}\\sum_{i=1}^{N}v_i(0)\\cdot v_i(t)",
+            caption: "参考帧取遍整条轨迹再平均，单帧的 VACF 抖得看不出峰"
+          },
+          {
+            type: "p",
+            text: "对 VACF 做傅里叶变换得到振动态密度 vDOS，它近似红外谱：峰的位置对应振动频率，峰的相对高低近似强度。这条路的好处是不用做有限差分 Hessian，一条 MD 轨迹就够；代价是经典核动力学没有零点能，峰位与实验 IR 会差一截。"
+          },
+          {
+            type: "code",
+            lang: "bash",
+            title: "两条路：TRAVIS 或现成脚本",
+            text: `# 路一：TRAVIS，用速度轨迹直接出振动谱
+travis -p ../cp2k-vel-1.xyz
+# 回答 IR 谱 / 元素对 / 帧范围，输出一组 CSV，直接画
+
+# 路二：郑奇靖的 vacf.py，末尾改成你要的元素对
+python vacf.py
+# 输出 pcf.png（RDF）、pdos.png（IR）、vacf.png（VACF）`
+          },
+          {
+            type: "compare",
+            left: {
+              title: "用现成工具",
+              items: [
+                "VMD 插件与 vacf.py：图形界面或改两行就能跑，出图快。",
+                "TRAVIS：输出规范，CSV/AGR/CUBE 都有，能直接进论文。",
+                "代价是速度：长轨迹上全帧平均会把 VMD 拖死。"
+              ]
+            },
+            right: {
+              title: "自己写 numpy",
+              items: [
+                "参考帧策略、PBC 处理、单位换算全部可控。",
+                "想算分元素的 VACF、去掉质心平动，几行就改完。",
+                "代价是要自己验证一遍，别把单位写错。"
+              ]
+            }
+          },
+          {
+            type: "callout",
+            kind: "info",
+            title: "峰位对不上是常态",
+            text: "vDOS 的峰位与实验 IR 差几十到上百 cm⁻¹ 很常见：经典核动力学没有零点能，谐振近似也不管非谐。要比峰位就统一乘一个经验标度因子，别逐个峰硬调——那样等于把误差拟合进参数里。300 K 水的红外计算与实验对比，讲义里有现成的图可以参照。"
+          },
+          {
+            type: "p",
+            text: "VASP 那条路要绕一下：它不输出速度，只能用相邻帧坐标差除以时间步反推速度，再用 xdat2vdat.pl 转成速度轨迹。CP2K 省了这一步，&MOTION%&PRINT%&VELOCITIES 直接写 cp2k-vel-1.xyz，格式与坐标轨迹同构。"
+          }
+        ]
+      },
+      {
+        id: "13.7",
+        title: "密度剖面与界面",
+        blocks: [
+          {
+            type: "p",
+            text: "密度剖面是把所有帧、所有目标原子的一个坐标分量收集起来做直方图。它能回答两个问题：液体在固体表面是分层还是乱堆，以及吸附层离表面多远。做法比 RDF 简单，前提是方向选对——板层法向是 z。"
+          },
+          {
+            type: "code",
+            lang: "bash",
+            title: "zdistr.py：抽出每帧每个原子的 z",
+            text: `# 用法：python zdistr.py 轨迹 元素名
+python zdistr.py cp2k-pos-1.xyz H
+python zdistr.py cp2k-pos-1.xyz O
+# 分别写出 distance-H.xyz 与 distance-O.xyz，每行一个 z 坐标`
+          },
+          {
+            type: "p",
+            text: "这个脚本本身只做抽取：逐帧读 xyz，把元素名匹配的原子那一行的 z 值（第 4 列）全部追加到 `distance-元素.xyz`。剩下的直方图化交给 numpy，四行就出剖面：存成 profile.py，跑 `python profile.py`，得到第一列 z / Å、第二列计数的两列数据。"
+          },
+          {
+            type: "code",
+            lang: "python",
+            title: "profile.py：把 z 清单变成密度剖面",
+            text: `import numpy as np
+
+d = np.loadtxt('distance-H.xyz')
+h, e = np.histogram(d, bins=200, range=(0.0, 27.28))
+np.savetxt('profile_H.dat', np.c_[0.5 * (e[1:] + e[:-1]), h])`
+          },
+          {
+            type: "p",
+            text: "z 的上限照抄盒子的第三个边长（上面这块板层模型是 27.28 Å）。计数除以总帧数就得到每个 bin 的平均原子数，再除以 bin 体积（面积 × 宽度）才是真正的数密度。这一步很容易漏，漏了就只能比较形状、不能比较绝对高度。"
+          },
+          {
+            type: "table",
+            head: ["图形特征", "说明", "怎么核对"],
+            rows: [
+              ["体相区一条水平平台", "密度等于体相值", "与 1 g/cm³ 对应的高度比对"],
+              ["界面处一段斜坡", "从液体密度衰减到零", "斜坡中点近似界面位置"],
+              ["紧贴表面的尖峰", "吸附层或第一水层", "峰到表面的距离就是吸附距离"],
+              ["峰与峰之间的谷", "分层结构，水的双层", "谷深说明层间交换快慢"]
+            ]
+          },
+          {
+            type: "callout",
+            kind: "tip",
+            title: "先丢掉预平衡",
+            text: "统计从第 500 帧之后开始，把升温与平衡那段丢掉再算。讲义在 Au-H₂O 与 Au-TiO₂ 的密度剖面里都是这么处理的。忘了丢，表面那层的峰会因为初始构型没松弛而偏高。"
+          },
+          {
+            type: "p",
+            text: "质心分布是同一类分析的另一半：`python masscenter-TiO2.py newpos.xyz` 把每帧的质心坐标写出来，看的是整块水膜有没有漂、有没有塌。它与密度剖面配合，一个看分布形状，一个看整体位置。"
+          }
+        ]
+      },
+      {
+        id: "13.8",
+        title: "一条流水线与排错",
+        blocks: [
+          {
+            type: "p",
+            text: "把前面几节串起来，一条轨迹从产出到出图的顺序是固定的。顺序错一步，后面的曲线会错得很难看出来——峰还在，位置和高度不对。照着下面六步走一遍。"
+          },
+          {
+            type: "steps",
+            items: [
+              "确认 cp2k-pos-1.xyz 存在，并且 cp2k-1.ener 最后一行是正常结束而不是报错中断。",
+              "从 cp2k.out 里抄出 &CELL 的 ABC，记下步长与 &EACH 的间隔，算出每帧多少 fs。",
+              "VMD 里 pbc set，pbc box 确认盒子，再进行后续分析：RDF 要 pbc set，MSD 不要 wrap。",
+              "能量与温度先画一遍，确认势能在平台区内震荡，把前几 ps 标成预平衡。",
+              "RDF 与配位数交叉验证第一峰与积分值；MSD 多参考帧平均后取后半段斜率。",
+              "需要振动谱再算 VACF；界面体系加做密度剖面与质心分布。"
+            ]
+          },
+          {
+            type: "table",
+            head: ["症状", "常见原因", "怎么处理"],
+            rows: [
+              ["RDF 第一峰位置整体偏小", "没 pbc set，VMD 按 1 Å 默认盒子算镜像", "先 pbc set {a b c} -all 再算"],
+              ["MSD 一开头就线性上冲", "wrap 过，或参考帧取自未平衡段", "不 wrap；忽略前 N 帧"],
+              ["扩散系数大了一个数量级", "忘记除 6，或单位没换成 cm²/s", "D = 斜率/6，Å²/ps × 1e-4"],
+              ["密度剖面看不到界面", "直方图 bin 太粗，或 z 上限写错", "bins 取 200 以上，上限照抄盒长"],
+              ["VMD 卡死", "选了全帧平均的 MSD", "按 500 帧间隔取参考帧"],
+              ["振动谱峰位整体偏移", "经典动力学没有零点能", "统一乘经验标度因子再比"]
+            ]
+          },
+          {
+            type: "callout",
+            kind: "danger",
+            title: "判成功的两条",
+            text: "一是 cp2k.out 末尾出现 PROGRAM ENDED AT，说明这次 MD 正常走完；二是 cp2k-1.ener 里 Cons Qty 一列在整个采样段里基本水平，说明能量没有系统性漂移。两条都满足，再做后处理才有意义。"
           },
           {
             type: "keypoints",
             items: [
-              "先看 .ener 和 out：温度守住、SCF 每步收敛，再谈画图",
-              "丢前 1/3 轨迹；末帧时间对不上 STEPS×TIMESTEP 就回去查重启记录",
-              "g(r) 的三个参数：元素对、归一化密度、方向（表面体系要分层）",
-              "MSD 只拟合线性段；二维扩散用 4t，报数时写清恒温器与拟合区间",
-              "cube 全是原子单位；差分密度三次单点的 cell 与参数必须逐行一致",
-              "原子电荷不跨方法比较；Bader 的价电子数要对着赝势核对",
-              "金属体系的 DOS 需要 SMEAR + ADDED_MOS，否则费米能级以上是空的",
-              "功函数 = 真空平台 − 费米能级；真空不平先做偶极校正"
+              "轨迹默认是 XMOL 格式、不带晶胞，VMD 里必须 pbc set，RDF 才可信。",
+              "RDF 要 pbc set 之后再算，MSD 与 RMSD 反过来不能 wrap，顺序搞反就得到假曲线。",
+              "MSD 用多参考帧平均，长时间极限下斜率除 6 得扩散系数，Å²/ps 乘 1e-4 得 cm²/s。",
+              "log(D) 对 1000/T 的斜率等于 −Ea/(2303 kB)，讲义那组数据给出 Ea = 0.2141 eV。",
+              "密度剖面就是把某元素的 z 坐标做成直方图，先丢掉预平衡的帧。"
             ]
           }
         ]
@@ -431,53 +597,71 @@ grep Fermi cp2k.out`
     ],
     quiz: [
       {
-        q: "在 g(r) 曲线上把积分上限取在第一峰后的第一个极小值，目的是什么？",
-        options: ["得到第一配位壳层的配位数", "得到体系的总电子数", "得到扩散系数", "得到功函数"],
+        q: "CP2K 默认写出的 cp2k-pos-1.xyz 是什么格式，缺了什么信息？",
+        options: [
+          "PDB 格式，缺了速度",
+          "XMOL（普通 xyz）格式，缺了晶胞信息",
+          "EXTXYZ 格式，什么都有",
+          "DCD 格式，缺了原子名"
+        ],
+        answer: 1,
+        explain: "默认 FORMAT 是 XMOL，就是最常见的 xyz：原子数、注释行、每行一个原子坐标。晶胞不在里面，所以 VMD 里必须先 pbc set。想要带晶胞可以在 &TRAJECTORY 里把 FORMAT 改成 PDB 或 EXTXYZ。"
+      },
+      {
+        q: "RDF 与 MSD 对 pbc 的要求为什么相反？",
+        options: [
+          "RDF 要周期性镜像，MSD 要真实位移不被折叠",
+          "RDF 要真实位移，MSD 要周期性镜像",
+          "两者都要求先 wrap",
+          "两者都不允许 pbc set"
+        ],
         answer: 0,
-        explain: "第一峰对应最近邻距离，峰后的极小值是第一配位壳层与第二壳层的分界。积分到极小值得到第一壳层配位数；积分上限若取到峰顶或更远，会把第二壳层的原子也计进来。"
+        explain: "RDF 统计的是周围有谁，必须有周期镜像才是体相；MSD 统计的是原子到底挪了多远，wrap 会把跨边界的真实位移折叠回盒内，位移被抹掉，扩散系数就偏小。讲义的提醒顺序就是：RDF 先 pbc set，MSD 不要 wrap。"
       },
       {
-        q: "金属 slab 上要画 DOS 图，下面哪一项是必须的？",
-        options: ["只开 UKS 就够，空带会自动算出来", "需要 SMEAR 处理分数占据，并给 ADDED_MOS 留出空带", "必须用 OT 而不是对角化", "必须关掉 SURFACE_DIPOLE_CORRECTION"],
+        q: "三维体系里 D = 斜率/6，这个 6 从哪来？",
+        options: [
+          "拟合时取的窗宽",
+          "因为每个方向有正负两个半轴",
+          "Einstein 关系 MSD = 6Dt 在三维下的系数",
+          "盒子有三条边"
+        ],
+        answer: 2,
+        explain: "三维随机行走里每个方向的 MSD 是 2Dt，三个方向加起来 6Dt，所以 dMSD/dt = 6D，D 等于斜率除以 6。二维是 4，一维是 2。"
+      },
+      {
+        q: "log(D) 对 1000/T 作图的斜率是 −1.07871，kB = 8.6173×10⁻⁵ eV/K，活化能是多少？",
+        options: ["0.093 eV", "0.214 eV", "2.14 eV", "21.4 eV"],
         answer: 1,
-        explain: "金属在费米能级处有部分占据，不开 SMEAR 会让占据数在两步之间来回跳、SCF 震荡；CP2K 默认只算占据轨道，空带不足时费米能级以上没有态，DOS 在带边被截断。"
+        explain: "斜率 = −Ea/(2303 kB)，所以 Ea = 1.07871 × 2303 × 8.6173×10⁻⁵ eV ≈ 0.2141 eV。2303 里含着两项：2.303 把 ln 换成 log10，1000 来自横轴用 1000/T 而不是 1/T。"
       },
       {
-        q: "把 MSD 的平台段也放进线性回归拟合扩散系数，结果会怎样？",
-        options: ["D 被系统性低估", "D 被系统性高估", "没有影响，只是误差棒变大", "D 变成负值"],
-        answer: 0,
-        explain: "平台段的斜率接近零，混进回归会拉低整体斜率，而 D 正比于斜率，于是被低估。反过来只取最前面几个点会落进弹道段（MSD ∝ t²），那时斜率偏大、D 被高估。"
-      },
-      {
-        q: "同一个 CO/Ni(100) 体系，Bader 给 Ni +0.06 e，Mulliken 给 −0.327 e。最合理的解读是？",
-        options: ["其中一个程序算错了", "划分规则不同，绝对值不可跨方法比较，只能在同一方法内看趋势", "应该取两者的平均值", "说明体系没有电荷转移"],
+        q: "密度剖面统计时为什么要丢掉前面几百帧？",
+        options: [
+          "前面的帧文件没写完",
+          "那一段还在升温与平衡，构型不代表平衡态",
+          "丢掉帧能让直方图更平滑",
+          "CP2K 从第 500 帧才开始写坐标"
+        ],
         answer: 1,
-        explain: "Bader 按电子密度零通量面切原子盆，Mulliken 按基函数归属并平分重叠布居。规则不同，连符号都可以不同。论文里只用一种方法画趋势并在方法段注明，不要跨方法比绝对值。"
-      },
-      {
-        q: "算功函数时发现真空区的静电势曲线不平、有斜率，最应该先做什么？",
-        options: ["直接把曲线两端取平均当真空能级", "检查 slab 是否上下不对称，必要时做偶极校正或改用对称 slab", "把 SURF_DIP_DIR 改成 X", "改用更大的 CUTOFF"],
-        answer: 1,
-        explain: "真空区静电势不平意味着 slab 上下表面不等价，存在净偶极。此时「真空能级」本身没有唯一值，取平均只是掩盖问题；正确做法是用 SURFACE_DIPOLE_CORRECTION 做偶极校正，或构造上下对称的 slab。"
+        explain: "MD 开始时体系还没平衡，表面吸附层与水的排列都还在松弛。讲义的做法是从第 500 帧之后开始统计，丢掉预平衡段，否则贴近表面的峰会偏高、位置也会漂。"
       }
     ],
     terms: [
-      { t: "径向分布函数", en: "radial distribution function (RDF)", d: "g(r) 描述以某原子为中心、半径 r 处找到另一类原子的概率相对均匀分布的倍数；第一峰位置给最近邻距离，峰后极小值是第一配位壳层边界。" },
-      { t: "配位数", en: "coordination number", d: "把 g(r) 从 0 积分到第一极小值得到的第一壳层邻居数，需用同一区域的数密度归一化。" },
-      { t: "均方位移", en: "mean square displacement (MSD)", d: "⟨|r(t) − r(0)|²⟩，粒子位移平方的系综平均；长时间极限下对时间线性增长，斜率给出扩散系数。" },
-      { t: "扩散系数", en: "diffusion coefficient", d: "MSD 线性段斜率除以 6（三维）或 4（二维/面内），只应在一段明确标注的线性区间内拟合。" },
-      { t: "差分电荷密度", en: "charge density difference", d: "Δρ = ρ(AB) − ρ(A) − ρ(B)，用来显示成键或吸附时电子在空间中的重新分布；要求三次单点的几何与计算参数完全一致。" },
-      { t: "电子定域化函数", en: "electron localization function (ELF)", d: "取值 0–1 的实空间函数，反映电子定域程度；ELF > 0.5 的区域通常对应共价键、孤对电子或多中心键。" },
-      { t: "功函数", en: "work function", d: "把电子从固体表面移到真空所需的最小能量，Φ = E_vac − E_F；它是表面的性质而非体相本征量，对晶面与吸附物敏感。" },
-      { t: "投影态密度", en: "projected density of states (PDOS)", d: "把态密度按原子与角动量（s/p/d/f）分解，用来看某个原子的哪些轨道在某个能量区间有贡献，是判断杂化与电荷转移的主要工具。" }
+      { t: "轨迹", en: "trajectory", d: "把每一帧的原子坐标按时间顺序写成的文件，CP2K 默认叫 cp2k-pos-1.xyz，格式是 XMOL。" },
+      { t: "径向分布函数", en: "radial distribution function", d: "g(r)，距离 r 的球壳里找到某类原子的概率相对理想气体的倍数，第一峰位置就是最可几的接触距离。" },
+      { t: "配位数", en: "coordination number", d: "把 g(r) 乘以球壳体积并积分到第一极小得到的原子数目，水在室温下 O–O 第一层约 4。" },
+      { t: "均方位移", en: "mean squared displacement", d: "MSD(t)，原子相对参考帧位移平方的系综平均；AIMD 里要用多参考帧平均才干净。" },
+      { t: "扩散系数", en: "diffusion coefficient", d: "D，三维里等于 MSD 长时间斜率除以 6，单位常用 cm²/s，1 Å²/ps = 1e-4 cm²/s。" },
+      { t: "速度自相关函数", en: "velocity autocorrelation function", d: "VACF，0 时刻与 t 时刻速度点乘的系综平均；做傅里叶变换得到振动态密度，近似红外谱。" },
+      { t: "密度剖面", en: "density profile", d: "沿某一方向（界面体系取 z）统计原子坐标的直方图，用来看液体在固体表面是否分层。" },
+      { t: "周期性缠绕", en: "pbc wrap", d: "把越过盒子边界的分子贴回盒内的操作。RDF 需要它配合 pbc set，MSD 则不能先做。" }
     ],
     sources: [
-      { t: "CP2K 手册：&PRINT（所有打印段的入口）", url: "https://manual.cp2k.org/trunk/CP2K_INPUT/FORCE_EVAL/DFT/PRINT.html" },
-      { t: "CP2K 手册：&PRINT/&E_DENSITY_CUBE（电子密度与自旋密度 cube）", url: "https://manual.cp2k.org/trunk/CP2K_INPUT/FORCE_EVAL/DFT/PRINT/E_DENSITY_CUBE.html" },
-      { t: "CP2K 手册：&PRINT/&DOS（总 DOS、PDOS 与 LDOS 的层次结构）", url: "https://manual.cp2k.org/trunk/CP2K_INPUT/FORCE_EVAL/DFT/PRINT/DOS.html" },
-      { t: "CP2K 手册：态密度与投影态密度的原理", url: "https://manual.cp2k.org/trunk/methods/electronic_structure/dos.html" },
-      { t: "CP2K 手册：布居分析与原子电荷（Mulliken/Löwdin/Hirshfeld）", url: "https://manual.cp2k.org/trunk/methods/electronic_structure/population/index.html" },
-      { t: "CP2K 手册：分子轨道与 cube 输出", url: "https://manual.cp2k.org/trunk/methods/electronic_structure/molecular_orbitals.html" }
+      { t: "CP2K_INPUT / MOTION / PRINT / TRAJECTORY", url: "https://manual.cp2k.org/trunk/CP2K_INPUT/MOTION/PRINT/TRAJECTORY.html" },
+      { t: "CP2K_INPUT / MOTION / MD", url: "https://manual.cp2k.org/trunk/CP2K_INPUT/MOTION/MD.html" },
+      { t: "CP2K_INPUT / MOTION / MD / REFTRAJ", url: "https://manual.cp2k.org/trunk/CP2K_INPUT/MOTION/MD/REFTRAJ.html" },
+      { t: "Molecular dynamics", url: "https://manual.cp2k.org/trunk/methods/sampling/molecular_dynamics.html" }
     ]
   };
 })();
