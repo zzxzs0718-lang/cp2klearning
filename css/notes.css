@@ -361,8 +361,13 @@ body {
   font-family: var(--mono); font-size: .87em;
   background: var(--code-bg); border: 1px solid var(--nt-line);
   border-radius: 5px; padding: .1em .34em; color: var(--code-ink);
-  white-space: normal; overflow-wrap: anywhere;
+  white-space: normal; overflow-wrap: break-word;
 }
+
+/* 表格内的文件名/段名不做断词，交给表格自动加宽 */
+.sec td code, .sec th code { white-space: nowrap; }
+.chapter .tbl td:first-child, .chapter .tbl th:first-child { min-width: 128px; }
+.chapter .tbl td code { font-size: .82em; }
 
 /* 提示块：左侧黄条 + 极浅底 */
 .callout {
