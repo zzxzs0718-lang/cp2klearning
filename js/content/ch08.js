@@ -119,7 +119,6 @@
       REL_CUTOFF 60
     &END MGRID
     &QS
-      WF_INTERPOLATION ASPC
       EXTRAPOLATION_ORDER 3
     &END QS
     &SCF
@@ -182,7 +181,7 @@
         blocks: [
           {
             type: "p",
-            text: "同一体系的对角化版本，把 `&OT` 换成 `&DIAGONALIZATION`，并补上混合与展宽。这份输入里 `NBROYDEN 8` 是 `NBUFFER` 的别名（历史写法），作用都是控制 Broyden 混合保留的历史步数。",
+            text: "同一体系的对角化版本，把 `&OT` 换成 `&DIAGONALIZATION`，并补上混合与展宽。这份输入里 `NBUFFER 8` 控制 Broyden 混合保留的历史步数（老输入里常写作 `NBROYDEN`，是同一个参数的旧名）。",
           },
           {
             type: "code",
@@ -196,7 +195,6 @@
   &END MGRID
   &QS
     EPS_DEFAULT 1.0E-14
-    WF_INTERPOLATION ASPC
     EXTRAPOLATION_ORDER 3
   &END QS
   &SCF
@@ -217,7 +215,7 @@
       METHOD BROYDEN_MIXING
       ALPHA 0.1
       BETA 1.5
-      NBROYDEN 8
+      NBUFFER 8
     &END MIXING
   &END SCF
 &END DFT`,
@@ -228,7 +226,7 @@
           },
           {
             type: "p",
-            text: "混合参数是这门课里最「手艺」的部分：`ALPHA 0.1` 表示新密度只占 10%，步子小、稳但慢；`BETA 1.5` 是 Kerker 阻尼的分母参数（单位 bohr⁻¹），专门压长波电荷振荡，名字容易让人误以为是 Broyden 的历史权重；`NBROYDEN 8`（也就是 `NBUFFER`）才是「多留几步历史」。收敛困难时先降 `ALPHA`（如 0.05），再考虑换 `PULAY_MIXING` 或 `KERKER_MIXING`；不要同时改三个参数，否则你不知道是谁起了作用。",
+            text: "混合参数是这门课里最「手艺」的部分：`ALPHA 0.1` 表示新密度只占 10%，步子小、稳但慢；`BETA 1.5` 是 Kerker 阻尼的分母参数（单位 bohr⁻¹），专门压长波电荷振荡，名字容易让人误以为是 Broyden 的历史权重；`NBUFFER 8` 才是「多留几步历史」（旧名 `NBROYDEN`）。收敛困难时先降 `ALPHA`（如 0.05），再考虑换 `PULAY_MIXING` 或 `KERKER_MIXING`；不要同时改三个参数，否则你不知道是谁起了作用。",
           },
           {
             type: "table",

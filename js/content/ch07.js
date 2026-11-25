@@ -86,7 +86,7 @@
     &END MGRID
     &POISSON
       PERIODIC NONE
-      PSOLVER MT
+      POISSON_SOLVER MT
     &END POISSON
     &SCF
       EPS_SCF 1.0E-6
@@ -231,7 +231,7 @@
           },
           {
             type: "p",
-            text: "三个关键词必须理解：`L 2` 表示作用在 d 轨道（f 电子用 3）；`U_MINUS_J` 是有效 U（已经扣掉交换 J），单位 eV，课程练习里 Ti 3d 取 13.6；`EPS_U_RAMPING` 是「SCF 收敛到这个阈值后才真正打开 +U」的开关，`U_RAMPING` 则控制 U 从 0 逐步升到目标值的步长。难收敛体系可以先把 U 设小、再逐步加到目标值。",
+            text: "三个关键词必须理解：`L 2` 表示作用在 d 轨道（f 电子用 3）；`U_MINUS_J` 是有效 U（已经扣掉交换 J），单位 eV——上例的 13.6 只是一个示例数字，具体取多少要自己扫或查同体系文献（讲义里 Fe 的例子用 4.0 eV、Fe₃O₄ 用 3 eV）；`EPS_U_RAMPING` 是「SCF 收敛到这个阈值后才真正打开 +U」的开关，`U_RAMPING` 则控制 U 从 0 逐步升到目标值的步长。难收敛体系可以先把 U 设小、再逐步加到目标值。",
           },
           {
             type: "p",
