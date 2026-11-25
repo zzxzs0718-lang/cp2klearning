@@ -291,7 +291,6 @@
   &END SUBSYS
   &MOTION
     &CELL_OPT
-      TYPE DIRECT_CELL_OPT
       OPTIMIZER BFGS
       MAX_ITER 200
       EXTERNAL_PRESSURE 1.01325E+00
@@ -314,6 +313,16 @@
             kind: "danger",
             title: "变胞会改变网格",
             text: "CUTOFF 固定时，晶胞变大意味着格点间距变化，能量/力/应力可能出现不连续。做 CELL_OPT 时可用 `&CELL/CELL_REF` 指定参考晶胞（取优化范围的上限），让格点数保持稳定，再做一次 CUTOFF 复核。",
+          },
+          {
+            type: "p",
+            text: "课程里有一个可以直接对照的例子：Cu 的 FCC 晶胞用 PBE 优化，晶胞常数从实验值 3.6147 Å 变成 3.682 Å，偏大约 1.9%——这是 PBE 已知的高估趋势，不代表你的输入有错。看结果用 `grep CELL cp2k.out`，输出里有 Volume、Vector a/b/c、Angle 等行；原胞太小（比如只有 2 个原子）时要先扩胞并设 k 点，而 **k 点只能配对角化**，不能配 OT。",
+          },
+          {
+            type: "callout",
+            kind: "tip",
+            title: "CELL_OPT 的三个进阶开关",
+            text: "① `OPTIMIZER CG` 配 `&CG &LINE_SEARCH TYPE 2PNT &END` 每步更贵但更稳，BFGS 在晶胞与原子同时动时容易震荡；② 知道空间群就写 `KEEP_SYMMETRY T`，晶胞只沿对称性允许的方向变；③ `EXTERNAL_PRESSURE` 可以给 9 个分量（`1.0 0.0 0.0 0.0 1.0 0.0 0.0 0.0 1.0`），做各向异性应变或二维材料的面内/面外不同压力时要用完整写法。",
           },
         ],
       },
@@ -455,6 +464,20 @@ done`,
             text: "`&SUBSYS` 里的坐标不会用于镜像计算（每个 `&REPLICA` 自带文件），但输入校验要求它存在，放一个合法结构即可。跑完后用 `grep -1 MAX cp2k-BAND6.out` 看最高点能量，再把各镜像轨迹拼起来画能垒。",
           },
           {
+            type: "p",
+            text: "能垒就这么读：先看最高点那一帧的 MAX 行，它给出路径上的最高能量 E_TS；用 E_TS 减去初态能量得活化能 **Ea**，用末态减初态得反应能 **ΔE**。课程的例子是 Ea = 0.21 eV、ΔE = −0.42 eV，即一个放热 0.42 eV、越过 0.21 eV 势垒的基元步骤。把所有镜像的能量按顺序排开就是能量曲线，最高点落在哪一帧，就说明鞍点在哪里。",
+          },
+          {
+            type: "p",
+            text: "并行与画图两件事容易踩坑。`NPROC_REP` 与 `NUMBER_OF_REPLICA` 的乘积**可以超过总核数**——56 核配 28 与 6 个镜像，就是 2 个镜像同时算、其余排队，这样每个镜像拿到的核数够多，比拆得很碎更快。画能垒时用一段循环把各镜像的最后一条轨迹拼起来：`for i in {1..6} ; do tail -n 125 \"cp2k-pos-Replica_nr_${i}-1.xyz\" >> neb.xyz ; done`（125 = 原子数 + 2 行头）。",
+          },
+          {
+            type: "callout",
+            kind: "info",
+            title: "ALIGN_FRAMES / ROTATE_FRAMES 该不该开",
+            text: "手册默认都开（T），CP2K 会先把每个镜像整体平移、旋转到与参考帧一致。课程代码把两者都设成 **F**，前提是插点得到的结构本身已经对齐（`xyz2neb.pl` 按原子对应关系插值，本来就对齐）。分子在真空中转动时开启有用；已经对齐的路径开着，反而可能引入额外变换误差。",
+          },
+          {
             type: "callout",
             kind: "key",
             title: "DIMER 什么时候用",
@@ -489,6 +512,37 @@ done`,
 &END MOTION`,
           },
           {
+            type: "code",
+            lang: "cp2k",
+            title: "同时打开偶极矩与振动强度",
+            text: `&FORCE_EVAL
+  &DFT
+    &PRINT
+      &MOMENTS
+        PERIODIC F
+        UNIT debye
+      &END MOMENTS
+    &END PRINT
+  &END DFT
+&END FORCE_EVAL
+
+&MOTION
+  &VIBRATIONAL_ANALYSIS
+    DX 0.01
+    INTENSITIES T
+    FULLY_PERIODIC F
+  &END VIBRATIONAL_ANALYSIS
+&END MOTION`,
+          },
+          {
+            type: "p",
+            text: "IR 强度要**两处同时打开**：`&VIBRATIONAL_ANALYSIS` 的 `INTENSITIES T`，以及 `&DFT/&PRINT/&MOMENTS` 的偶极矩输出——强度来自偶极矩对位移的导数，没有后者就算不出来。课程里水分子（`FULLY_PERIODIC F` 去掉平动转动，只剩 3 个模）得到 1617.250372、3716.935835、3822.025957 cm⁻¹，对应强度 0.006627、0.003664、0.007903；用 `grep -E \"Freq|Intensities\" cp2k.out` 一次取出两行 `VIB|` 结果。约 1600 cm⁻¹ 的是弯曲模，3700 与 3820 附近是两个 O–H 伸缩模，其中 3822 的强度最大。",
+          },
+          {
+            type: "p",
+            text: "两个实战经验。**固定原子时并行方式要改**：`NPROC_REP` 设小、让更多位移结构同时算（56 核配 7，就是 8 个结构并行），否则容易出现不合理的虚频；表面吸附体系可以只放开吸附物、固定整个 slab。分析输出用课程脚本 `cp2kfreq.pl cp2k.out`（每行频率后跟 0/1，0 是实频、1 是虚频），再用 `cp2kfreq2mov.pl cp2k.out last.xyz` 生成 `mode-1.xyz`，扔进 Jmol 看这个模到底在动什么。",
+          },
+          {
             type: "p",
             text: "`DX` 是位移步长，太大有非谐误差、太小被数值噪声淹没，0.01 bohr 是常用值。`FULLY_PERIODIC T` 对周期体系必要；分子/团簇则要关掉，否则平动转动模会被周期性人为改变。频率结果还能给零点能（ZPE = Σhν/2），用于把电子能量修成 0 K 能量。",
           },
@@ -500,6 +554,136 @@ done`,
       },
       {
         id: "9.8",
+        title: "从切面到吸附能：一条完整的表面工作流",
+        blocks: [
+          {
+            type: "p",
+            text: "前面几节把零件拆开讲了。这一节按课程的实际顺序把它们串成一条线：切面 → 建吸附模型 → GEO_OPT → 取能量 → 算吸附能。对象是 Al₂O₃ 表面上的一个水分子，最后会得到一个可以直接写进论文的 eV 数。",
+          },
+          {
+            type: "list",
+            items: [
+              "切面：从体相晶体切出目标晶面，层数要够厚（表面重构与量子限域都要衰减掉），也要薄到算得动",
+              "建层：用 Materials Studio 的 Amorphous Cell 按 1 g/cm³ 建水盒（立方边长 10.2425 Å），再用 Build Layer 拼成水/氧化物异质结",
+              "调距离：水与表面的初始间距按化学合理性给，贴太近会让第一步 SCF 与力都很难看",
+              "排序与导出：存成 .car，用 `dmolcar2xyz.py -s` 按 z 坐标重排原子，导出 `coord.inc`",
+              "固定底层：把 slab 底部两层用 `FIXED_ATOMS` 的区间语法钉住，只放开表面与水",
+            ],
+          },
+          {
+            type: "code",
+            lang: "cp2k",
+            title: "slab_h2o.inp：表面吸附的 GEO_OPT",
+            text: `&GLOBAL
+  PROJECT al2o3_h2o
+  RUN_TYPE GEO_OPT
+&END GLOBAL
+
+&FORCE_EVAL
+  METHOD Quickstep
+  &DFT
+    BASIS_SET_FILE_NAME BASIS_MOLOPT
+    POTENTIAL_FILE_NAME GTH_POTENTIALS
+    &MGRID
+      CUTOFF 400
+      REL_CUTOFF 60
+    &END MGRID
+    &SCF
+      EPS_SCF 1.0E-6
+      MAX_SCF 100
+      &OT T
+        MINIMIZER CG
+        PRECONDITIONER FULL_ALL
+      &END OT
+    &END SCF
+    &XC
+      &XC_FUNCTIONAL PBE
+      &END XC_FUNCTIONAL
+      &VDW_POTENTIAL
+        &PAIR_POTENTIAL
+          TYPE DFTD3(BJ)
+          REFERENCE_FUNCTIONAL PBE
+        &END PAIR_POTENTIAL
+      &END VDW_POTENTIAL
+    &END XC
+  &END DFT
+  &SUBSYS
+    &CELL
+      ABC 10.242489 10.242489 21.0
+      ALPHA_BETA_GAMMA 90.0 90.0 90.0
+    &END CELL
+    &COORD
+      @INCLUDE 'coord.inc'
+    &END COORD
+    &KIND O
+      BASIS_SET DZVP-MOLOPT-SR-GTH
+      POTENTIAL GTH-PBE-q6
+    &END KIND
+    &KIND H
+      BASIS_SET DZVP-MOLOPT-SR-GTH
+      POTENTIAL GTH-PBE-q1
+    &END KIND
+    &KIND Al
+      BASIS_SET DZVP-MOLOPT-SR-GTH
+      POTENTIAL GTH-PBE-q3
+    &END KIND
+  &END SUBSYS
+  &MOTION
+    &GEO_OPT
+      OPTIMIZER BFGS
+      MAX_ITER 400
+      MAX_FORCE 6.0E-4
+    &END GEO_OPT
+    &CONSTRAINT
+      &FIXED_ATOMS
+        LIST 139..170
+      &END FIXED_ATOMS
+    &END CONSTRAINT
+  &END MOTION
+&END FORCE_EVAL`,
+          },
+          {
+            type: "p",
+            text: "三个细节决定这条流程能不能跑通。`@INCLUDE 'coord.inc'` 让几何留在单独文件里，改结构时不动输入；`LIST 139..170` 是**区间语法**，但编号顺序必须和 `coord.inc` 完全一致；`CUTOFF 400` 是起步值，含真空的盒子要做一次收敛测试。c 轴给 21 Å，让上下两个表面不互相作用。",
+          },
+          {
+            type: "p",
+            text: "优化收敛后取能量。课程的做法很省事：直接用 `grep = cp2k-pos-1.xyz | tail -1` 读最后一帧的能量列，或者 `grep -1 \"Total energy\" cp2k.out` 看 SCF 结束时的总能量。关键是**三个能量必须在同一套设置下算**：同一个泛函、同一份色散修正、同一组基组与赝势、同一个 CUTOFF 与 k 点、同一个晶胞。",
+          },
+          {
+            type: "formula",
+            tex: "E_{\\mathrm{ads}} = E_{A+B} - E_A - E_B",
+            caption: "A 是 slab，B 是吸附物，A+B 是吸附构型。单位是 Hartree，换成 eV 要乘 27.2114；负值表示吸附放热。",
+          },
+          {
+            type: "table",
+            head: ["体系", "总能量 (Hartree)", "备注"],
+            rows: [
+              ["H₂O 单分子", "-17.2199443926", "放同一个盒子里，只做单点"],
+              ["Al₂O₃ slab", "-1261.3349412419", "与吸附构型同一晶胞、同一层数"],
+              ["H₂O/Al₂O₃ 分子吸附", "-1278.5963247321", "优化后的最终能量"],
+              ["OH+H/Al₂O₃ 解离吸附", "-1278.6116891175", "水已经解离成羟基与质子的结构"],
+            ],
+            caption: "课程练习的真实数值。相邻两行相减就是吸附能，单位 Hartree；换成 eV 见下段。",
+          },
+          {
+            type: "p",
+            text: "代入公式：分子吸附是 −1278.5963247321 − (−17.2199443926) − (−1261.3349412419) = −0.0414386 Ha，乘 27.2114 得 **−1.13 eV**；解离吸附是 −0.0568028 Ha，得 **−1.54 eV**。所以这个表面上水的解离态比分子吸附更有利，差 0.41 eV。这两个数字就是这条流程的最终产品。",
+          },
+          {
+            type: "callout",
+            kind: "warn",
+            title: "三个能量必须同源",
+            text: "吸附能是两个大数相减得到的小数（这里 1278 Ha 减出 0.04 Ha），系统误差会被放大。七项必须一致：泛函、色散修正、基组、赝势、`CUTOFF`/`REL_CUTOFF`、k 点、晶胞与原子数。任何一项变了，差值里混进的就是设置差异，不是物理。",
+          },
+          {
+            type: "p",
+            text: "这条流程还能往下接：吸附构型的频率分析（上一节）把电子能量修成含零点能的 0 K 能量；要做自由能就得算熵，走第 12 章的增强采样。真实的水/氧化物界面与 QM/MM，第 16 章有完整案例。",
+          },
+        ],
+      },
+      {
+        id: "9.9",
         title: "四个常见失败与收束",
         blocks: [
           {

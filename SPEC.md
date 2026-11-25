@@ -114,7 +114,7 @@
 | ch03 | 安装与运行 | 起步 | ssmp/popt/psmp、源码编译、Spack/容器、Slurm 脚本、MPI×OMP、验证安装 | lecture_2、manual installation |
 | ch04 | 输入文件与计算流程 | 输入与体系 | &SECTION 语法、四层结构、RUN_TYPE、提交脚本、输出文件、restart、五类输入错误 | lecture_2/3、旧 ch03–05 |
 | ch05 | 基组、赝势、坐标与建模 | 输入与体系 | MOLOPT 基组、GTH 赝势与 q 值、&COORD/&CELL、slab/水盒/packmol、&KIND | lecture_2/3、manual basis_sets |
-| ch06 | GPW、网格与 CUTOFF 收敛 | 电子结构 | 高斯基组+辅助网格、多网格映射、CUTOFF/REL_CUTOFF 收敛、NGRIDS、GAPW | lecture_3、howto_converging_cutoff |
+| ch06 | GPW、网格与 CUTOFF 收敛 | 输入与体系 | 高斯基组+辅助网格、多网格映射、CUTOFF/REL_CUTOFF 收敛、NGRIDS、GAPW | lecture_3、howto_converging_cutoff |
 | ch07 | 泛函、色散、DFT+U、磁性、杂化 | 电子结构 | PBE/BLYP/TPSS、D3/D4、&DFT_PLUS_U、UKS/磁性、PBE0/HSE+ADMM | lecture_3/4、Hybrid_Functionals |
 | ch08 | SCF：OT、对角化、展宽与混合 | 电子结构 | OT 路线、DIAGONALIZATION、MIXING BROYDEN、SMEAR/ADDED_MOS、EPS_SCF、不收敛诊断 | lecture_3、manual convergence |
 | ch09 | 几何/晶胞优化与过渡态 | 结构与振动 | GEO_OPT、CELL_OPT、约束、CI-NEB、DIMER、初末态与验证 | lecture_3、manual optimization |

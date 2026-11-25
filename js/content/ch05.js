@@ -43,7 +43,7 @@
           },
           {
             type: "p",
-            text: "想找参照物建立直觉，可以对照 Pople 系列：SZV 大致相当于 STO-3G，DZVP 相当于 6-31G*，TZVP 相当于 6-311G*，TZV2P 相当于 6-311G(2df,2pd)。这只是量级上的类比——MOLOPT 是为 GPW 与凝聚相优化的，不能当成 Pople 基组的等价替换。另有一条纪律：**不要用 SZV 做生产计算**，它只适合粗筛、初猜和大体系的预收敛。",
+            text: "想找参照物建立直觉，可以对照 Pople 系列：SZV 大致相当于 STO-3G，DZVP 相当于 6-31G(d)，TZVP 相当于 6-311G(d)，TZV2P 相当于 6-311G(2df,2pd)。这只是量级上的类比——MOLOPT 是为 GPW 与凝聚相优化的，不能当成 Pople 基组的等价替换。另有一条纪律：**不要用 SZV 做生产计算**，它只适合粗筛、初猜和大体系的预收敛。",
           },
           {
             type: "p",
@@ -343,6 +343,181 @@ ls $CP2K_DATA_DIR/BASIS_MOLOPT $CP2K_DATA_DIR/GTH_POTENTIALS`,
       },
       {
         id: "5.6",
+        title: "表面的终端、悬挂键与 Wood 记法",
+        blocks: [
+          {
+            type: "p",
+            text: "同一个晶体沿同一个方向切，可以切出好几种表面，差别在于最外层留下谁。课程用 α-Al₂O₃(0001) 讲这件事：切面时只调一个 `Top` 的位置，就能得到 O-terminated，或者 Al-terminated 的不同版本。选哪一种不是审美问题——它决定表面有没有配位不饱和的金属、有没有净偶极、吸附能差多少。",
+          },
+          {
+            type: "table",
+            head: ["终端", "长什么样", "必须先处理的问题"],
+            rows: [
+              ["Al-terminated（对称）", "上下都暴露 Al，配位不饱和的 Al³⁺ 悬在表面", "用 -OH 饱和金属位点，否则表面态污染能带"],
+              ["O-terminated（上下同）", "两个面都是氧", "常与化学计量比冲突，O/Al 会偏离体相比例"],
+              ["两面不同（不对称）", "一侧 Al、一侧 O，slab 带净偶极", "加偶极校正，否则真空里出现虚假电场"],
+            ],
+            caption: "先认清上下两个面各是什么，再决定要不要补基团",
+          },
+          {
+            type: "p",
+            text: "课程里反复强调的一点：**移动 `Top` 时上下两个表面同时变化**。slab 有两个面，你不能只盯着吸附的那一面。α-Al₂O₃ 有个具体的教训——想在满足化学计量比的前提下让上下都是 O 暴露，是做不到的：某些切法会得到 O/Al = 21/12，而体相是 18/12。这类模型即使算得动，物理上也是自造的。",
+          },
+          {
+            type: "p",
+            text: "悬挂键用基团补。Al-terminated 表面上不饱和的 Al 用 -OH 饱和；由于 OH 带 −1 价，为了电荷平衡还要再补一个 H，整体相当于在表面解离了一个 H₂O。补完的 OH-terminated 表面才是常温常压下最接近真实 α-Al₂O₃(0001) 的模型。氢封端（-H）则常用于半导体与碳表面。",
+          },
+          {
+            type: "callout",
+            kind: "warn",
+            title: "不对称 slab 会自己造出一个电场",
+            text: "上下终端不同，slab 就有净偶极，周期性会把这块「带电板」重复成无限堆叠，真空区出现人为电场。CP2K 里用 &DFT 的 `SURFACE_DIPOLE_CORRECTION T` 加校正（方向由 `SURF_DIP_DIR` 指定）。做能带、功函数、吸附能时忘了这一步，误差会跟着真空厚度变。",
+          },
+          {
+            type: "h3",
+            text: "Wood 记法：一个 2×2 矩阵",
+          },
+          {
+            type: "p",
+            text: "重构表面的单胞常常与理想表面的单胞不共线，这时用 Wood 记法写：`(m×n)Rθ`——m、n 是沿两个方向的边长倍数，R 表示旋转，θ 是旋转角。`c(2×2)` 里的 c 是 centered，表示单胞中心还多一个等价单元；它和 `(√2×√2)R45°` 是同一个结构，只是说法不同。默认不写 p 就是 p(1×1)，p 表示 primitive。",
+          },
+          {
+            type: "p",
+            text: "落到计算上，Wood 记法就是一组整数矩阵。设原胞矢量为 a、b，新胞矢量为 A、B，则 A = m₁₁a + m₁₂b，B = m₂₁a + m₂₂b。矩阵的**行列式绝对值**告诉你扩了几倍胞。",
+          },
+          {
+            type: "table",
+            head: ["Wood 记法", "矩阵 (A, B) 的行", "|det|", "含义"],
+            rows: [
+              ["p(1×1)", "1 0 / 0 1", "1", "原胞，不扩不转"],
+              ["(2×1)", "2 0 / 0 1", "2", "一个方向加倍"],
+              ["c(2×2) = (√2×√2)R45°", "1 1 / 1 −1", "2", "转 45°，中心多一个单元"],
+              ["(√3×√3)R30°", "1 −1 / 2 1", "3", "Au(111) 上最常见的重构之一"],
+            ],
+            caption: "矩阵按行写；换成列向量写法时要转置，这是抄文献时最容易错的地方",
+          },
+          {
+            type: "p",
+            text: "课程用 Au(111)-(√3×√3)R30° 演示了怎么推：先用 A = a − b、B = 2a + b 写出新矢量，再把它们换算成 Å 填进 `&CELL`。二维材料扭转（魔角石墨烯）用的是同一套操作：`redefine lattice` 里填 11×11 的整数矩阵，再叠一层、转角度，剩下的交给 `Build Layers` 处理失配。",
+          },
+          {
+            type: "callout",
+            kind: "tip",
+            title: "用原子数自查矩阵",
+            text: "扩胞后的原子数 = |det| × 原胞原子数。数完对不上，八成是矩阵写成了转置、或者符号弄反。这比跑一遍程序再发现「多了三个原子」要快得多。",
+          },
+          {
+            type: "keypoints",
+            items: [
+              "切面先定终端；上下两个面都会随 Top 变化，必须一起看。",
+              "悬挂键用 -OH / -H 饱和；不对称 slab 需要偶极校正。",
+              "Wood 记法 = 整数矩阵，|det| 是扩胞倍数，用它核对原子数。",
+            ],
+          },
+        ],
+      },
+      {
+        id: "5.7",
+        title: "异质结与负载团簇：把两块拼起来",
+        blocks: [
+          {
+            type: "p",
+            text: "异质结（以及「团簇/分子吸附在表面上」）的难点不在于算，而在于**让两块东西在同一个周期性盒子里和平共处**。要盯的只有两件事：面内晶格是否匹配（mismatch），层间距离是否合理。",
+          },
+          {
+            type: "p",
+            text: "标准流程是四步。第一步，各自切面，层数按需要定。第二步，用 `redefine lattice` 把两边的面内晶格调成尽量接近（这一步常需要先扩超胞）。第三步，`Build Layers` 拼起来，在 `matching` 面板里看失配。第四步，删掉多余层、沿 c 方向加真空，再对 a、b 做选择性优化。",
+          },
+          {
+            type: "p",
+            text: "课程里的 g-C₃N₄/TiO₂(100) 案例值得记住数字：matching 显示 a 方向 8.88%、b 方向 4.21%、角度 4.60%。这在异质结里已经算**失配很大**，但单层二维材料可塑性强，靠一层轻微变形仍能匹配。软件会让你选以 layer1 还是 Average 为基准——被拉伸或压缩的那一层，就把应变写进了你的模型。",
+          },
+          {
+            type: "callout",
+            kind: "warn",
+            title: "应变与间距都要写进方法里",
+            text: "失配超过百分之几时，你算的其实是「带应变的异质结」。要么扩超胞找更小的失配，要么在文中明确写出应变大小与施加在哪一层。界面间距别用程序默认值，按原子半径与 vdW 半径检查；建完先用可视化软件看最小原子间距有没有重叠。",
+          },
+          {
+            type: "p",
+            text: "落到 CP2K 输入，异质结 slab 与普通 slab 的差别只有三点：`PERIODIC XY`（z 方向留真空，不做周期）、`SURFACE_DIPOLE_CORRECTION T`（若两层不对称），以及固定底部若干层原子。下面这份片段把这三点都写全了。",
+          },
+          {
+            type: "code",
+            lang: "cp2k",
+            title: "interface.inp（异质结 / 吸附体系的体系与约束）",
+            text: `&FORCE_EVAL
+  METHOD Quickstep
+  &DFT
+    BASIS_SET_FILE_NAME BASIS_MOLOPT
+    POTENTIAL_FILE_NAME GTH_POTENTIALS
+    SURFACE_DIPOLE_CORRECTION T
+    &SUBSYS
+      &CELL
+        ABC 10.2425 10.2425 40.0
+        PERIODIC XY
+      &END CELL
+      &TOPOLOGY
+        COORD_FILE_NAME ./interface.xyz
+        COORD_FILE_FORMAT XYZ
+      &END TOPOLOGY
+      &KIND Ti
+        BASIS_SET DZVP-MOLOPT-SR-GTH
+        POTENTIAL GTH-PBE-q12
+      &END KIND
+      &KIND O
+        BASIS_SET DZVP-MOLOPT-SR-GTH
+        POTENTIAL GTH-PBE-q6
+      &END KIND
+      &KIND C
+        BASIS_SET DZVP-MOLOPT-SR-GTH
+        POTENTIAL GTH-PBE-q4
+      &END KIND
+      &KIND N
+        BASIS_SET DZVP-MOLOPT-SR-GTH
+        POTENTIAL GTH-PBE-q5
+      &END KIND
+      &KIND H
+        BASIS_SET DZVP-MOLOPT-SR-GTH
+        POTENTIAL GTH-PBE-q1
+      &END KIND
+    &END SUBSYS
+  &END DFT
+&END FORCE_EVAL
+
+&MOTION
+  &GEO_OPT
+    OPTIMIZER LBFGS
+    MAX_ITER 200
+  &END GEO_OPT
+  &CONSTRAINT
+    &FIXED_ATOMS
+      LIST 1..24
+      COMPONENTS_TO_FIX XYZ
+    &END FIXED_ATOMS
+  &END CONSTRAINT
+&END MOTION`,
+          },
+          {
+            type: "p",
+            text: "负载团簇模型是同一套思路的简版：先单独优化团簇（气相小团簇的构型往往和体相完全不同），再放到切好的 slab 上。超胞要够大——课程用的是 5×5×1——否则团簇会与自己的镜像作用，吸附能随盒长变化，你测到的是「团簇 + 镜像」的能量。",
+          },
+          {
+            type: "p",
+            text: "团簇与载体的相对位置决定初始构型：金属团簇常落在空心位或台阶位，氧化物载体上则要试金属顶位与氧顶位。这些不是靠程序猜的——要么查文献的同族体系，要么用几个初始构型各跑一次短优化，取最稳定的。",
+          },
+          {
+            type: "keypoints",
+            items: [
+              "异质结先看 mismatch：失配大就扩超胞，或者明确报告施加的应变。",
+              "PERIODIC XY + 偶极校正 + 固定底层，是异质结 slab 的三件套。",
+              "团簇要单独优化、超胞要够大，否则吸附能里混进镜像相互作用。",
+            ],
+          },
+        ],
+      },
+      {
+        id: "5.8",
         title: "建模（二）：溶液盒与混合体系",
         blocks: [
           {
@@ -388,6 +563,29 @@ end structure`,
             text: "输出是 PDB，坐标在 Å、无晶胞，所以 CP2K 侧要自己写 `&CELL`（边长 40 Å），并在 `&KIND` 里给 H/O/C/N 配好基组赝势。液体的密度就是由「分子数 ÷ 盒子体积」决定的，所以盒子边长必须和 Packmol 的 `inside box` 一致——这两处对不上，密度就错了。",
           },
           {
+            type: "code",
+            lang: "bash",
+            title: "run_packmol.sh（生成盒子、核对原子数、转成 CP2K 能读的格式）",
+            text: `# 1) 跑 Packmol：输入从标准输入读，日志存成 mixture.log
+packmol < mixture.inp > mixture.log
+
+# 2) 看结论：末尾会说明是否找到满足 tolerance 的解
+tail -3 mixture.log
+
+# 3) 核对原子数：水 3 个原子、尿素(CH4N2O) 8 个原子
+head -1 mixture.pdb | awk '{print "atoms per frame:", $1}'
+
+# 4) 抽前几个原子的坐标，确认都落在 inside box 的范围里
+awk '/^(ATOM|HETATM)/ {print $6, $7, $8}' mixture.pdb | head -5
+
+# 5) 转成 xyz；也可以让 CP2K 直接读 pdb（&TOPOLOGY 支持 PDB）
+obabel mixture.pdb -O mixture.xyz`,
+          },
+          {
+            type: "p",
+            text: "同一个 `inside box` 还能做**分层**：课程的水/氯仿界面就是把水限制在 z < 20 Å、氯仿限制在 z > 20 Å 的两个盒子里，再加一个 `centerofmass` + `fixed` 的溶质块，把感兴趣的分子钉在界面中央不动。溶质的取向用 `rotate` 单独指定，这样界面模型既随机又可控。",
+          },
+          {
             type: "p",
             text: "给 slab 加水则是另一类问题：水不能穿进金属里，也不能在真空层里乱飘。课程的做法是用 Materials Studio 的 Amorphous Cell 在 slab 上方按 1 g/cm³ 填水，盒子取 Cu(100) 的 10.2425 Å 面内尺寸、z 方向留出真空；Packmol 更擅长纯液相，对固体表面的「只允许在上方填充」约束不好表达。",
           },
@@ -408,7 +606,7 @@ end structure`,
         ],
       },
       {
-        id: "5.7",
+        id: "5.9",
         title: "BSSE 与基组/赝势选择策略",
         blocks: [
           {
@@ -457,7 +655,7 @@ end structure`,
         ],
       },
       {
-        id: "5.8",
+        id: "5.10",
         title: "三类高频坑：不匹配、ghost、单位",
         blocks: [
           {

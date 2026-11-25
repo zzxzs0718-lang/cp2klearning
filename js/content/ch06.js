@@ -172,6 +172,21 @@ grep -E "Number of grid levels" h2o.out`,
             text: "每行的格式大致是 `count for grid 1: 2720 cutoff [a.u.] 50.00`：层号、这一层上的函数个数、该层截断能（原子单位）。注意截断能是 **a.u.**，与输入里的 Ry 差 2 倍，别直接对比数值。要看的模式是：最细层是否真的被用上（count 不为 0），以及绝大部分函数是否落在较粗的层上。",
           },
           {
+            type: "table",
+            head: ["输出里的片段", "含义", "怎么判断"],
+            rows: [
+              ["`count for grid 1:`", "被分配到第 1 层（最细）的高斯乘积个数", "为 0 说明最细层根本没被用上"],
+              ["`cutoff [a.u.]`", "这一层的平面波截断能，原子单位", "乘 2 才是输入里的 Ry 值"],
+              ["`count for grid 2:` 到 `4:`", "依次更粗的层各有多少函数", "多数函数应落在粗层，最细层只放窄函数"],
+              ["`Number of grid levels`", "程序实际用到的层数", "等于 NGRIDS，说明层数被用满了"],
+            ],
+            caption: "四行一起读，才能判断是「网格不够细」还是「高斯没被送上去」",
+          },
+          {
+            type: "p",
+            text: "官方教程在 Si₈ 上给过一组可对照的数字：REL_CUTOFF 固定 60 Ry、CUTOFF 100 Ry 时，第 1 到第 4 层分别是 2720、5000、2760、16 个乘积；把 CUTOFF 提到 250 Ry，最细层掉到只剩 264 个，其余变成 4088、3384、2760。**CUTOFF 变高、最细层的负载反而变轻**——这就是「只加 CUTOFF 不加 REL_CUTOFF 收益递减」的直接证据。",
+          },
+          {
             type: "p",
             text: "一个很有用的诊断：把 CUTOFF 从 300 提到 400，如果最细层的 count 反而**变少**、能量变化也很小，说明 REL_CUTOFF 已经把该进细网格的函数送上去了，提高 CUTOFF 只是在细化一个几乎没人用的网格——这时该同步提高 REL_CUTOFF，而不是继续加 CUTOFF。",
           },
@@ -204,6 +219,15 @@ grep -E "Number of grid levels" h2o.out`,
           {
             type: "p",
             text: "两轮扫描，顺序不能反。第一轮固定 `REL_CUTOFF`（官方教程取 60 Ry，并说明这对多数计算通常足够），把 `CUTOFF` 从低到高扫一遍，看总能量什么时候不再变化。第二轮固定一个已经够大的 `CUTOFF`（教程取 250 Ry），再扫 `REL_CUTOFF`。反过来的话，第一轮里 REL_CUTOFF 可能是瓶颈，你会在错误的 CUTOFF 上收敛。",
+          },
+          {
+            type: "steps",
+            items: [
+              { t: "先定目标精度", d: "教程把目标写成「总能量 1e-6 Ry 量级」；你自己按用途定：算 meV 级能量差，就要比这更严；只看趋势可以更松。" },
+              { t: "第一轮：固定 REL 扫 CUTOFF", d: "REL_CUTOFF 先取 60 Ry，CUTOFF 按 50 Ry 步长从 50 扫到 500（教程的范围）；记录每个点的总能量。" },
+              { t: "第二轮：固定 CUTOFF 扫 REL", d: "CUTOFF 取第一轮里已经进平台的偏大值（教程取 250 Ry），REL_CUTOFF 从 10 扫到 100、步长 10。" },
+              { t: "读结论并留档", d: "教程在 Si 体系上得到 CUTOFF 250 + REL_CUTOFF 60、误差小于 1e-8 Ha；你的体系必须自己扫，把得到的组合写进项目笔记。" },
+            ],
           },
           {
             type: "code",
@@ -295,6 +319,28 @@ done`,
           {
             type: "p",
             text: "把能量抄成两列表格，算相邻两档的差值。判据不是「差值小于某个魔法数」，而是「差值小于你目标性质的精度」：做能量差到 meV 量级，总能量就要收敛到 1e-6 Ha 量级；只做趋势研究，1e-4 Ha 可能就够。手册教程在它自己的 Si 体系上得到的是 CUTOFF 250 Ry 配 REL_CUTOFF 60 Ry 足以达到 1e-6 Ry 的精度，并且 REL_CUTOFF 超过 60 后能量误差已经极小——**这是那个体系的结论，你的体系必须自己扫**。",
+          },
+          {
+            type: "code",
+            lang: "bash",
+            title: "scan_grid.sh（一个 CUTOFF 一行：能量 + 各层分配）",
+            text: `#!/bin/bash
+# 每个 CUTOFF 一行：总能量 + 各层分到的高斯乘积数
+printf "%-8s %-22s %s\\n" CUTOFF "Energy(Ha)" "NG1 NG2 NG3 NG4"
+for c in 200 250 300 350 400; do
+  d=cut_$c; mkdir -p $d
+  sed "s/CUTOFF 300/CUTOFF $c/" grid_test.inp > $d/grid.inp
+  cp BASIS_MOLOPT GTH_POTENTIALS $d/
+  ( cd $d && cp2k.ssmp -i grid.inp -o grid.out )
+  e=$(grep -E "Total energy:|ENERGY" $d/grid.out | tail -1)
+  e=$(echo "$e" | awk '{print $NF}')
+  ng=$(awk '/count for grid/{printf "%s ", $5}' $d/grid.out)
+  printf "%-8s %-22s %s\\n" "$c" "$e" "$ng"
+done`,
+          },
+          {
+            type: "p",
+            text: "这张表比只记能量有用得多：能量告诉你收敛没收敛，各层的 count 告诉你**为什么**没收敛。如果最细层的 NG1 一路掉到个位数、而能量还在变，那几乎一定是 REL_CUTOFF 拖了后腿——把第二轮扫描提前做，问题会立刻显形。",
           },
           {
             type: "callout",

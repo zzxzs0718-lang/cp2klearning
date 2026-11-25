@@ -168,6 +168,12 @@ make -j 16 ARCH=local VERSION="popt psmp" test`,
             text: "`install_cp2k_toolchain.sh` 的选项很多，课程常用的三个是：`--with-openmpi=install`（自己装 MPI，避免与系统 MPI 混用）、`--math-mode=mkl`（用 MKL 的 BLAS/LAPACK/FFT）、`--with-scalapack=no`（先关掉 ScaLAPACK，减少依赖）。其余依赖按需打开：`--with-libxc=install`（泛函库）、`--with-libint=install`（杂化的 HFX 积分）、`--with-libxsmm=install`（小矩阵乘）、`--with-elpa=install`（本征求解器）。每多一个库，就多一个版本匹配问题，只装真正要用的。",
           },
           {
+            type: "callout",
+            kind: "info",
+            title: "toolchain 实际在装什么",
+            text: "脚本会安装 FFTW（网格 FFT）、ELPA（本征求解）、MKL 或 OpenBLAS/ScaLAPACK（线性代数）、libxsmm（小矩阵乘），再按选项装 libxc、libint、PLUMED、QUIP 等。所有东西都落在 `tools/toolchain/install/`，`source install/setup` 只是把 `PATH`、`LD_LIBRARY_PATH` 与 arch 模板指过去，不往系统目录写文件。",
+          },
+          {
             type: "p",
             text: "编译完成后，`arch/` 下会多出 `local.popt`、`local.psmp` 等文件，`exe/` 下是对应二进制。`ARCH=local` 就是告诉 make 用 `arch/local.*`；`VERSION` 写成「popt psmp」表示两个并行版本都编。",
           },
@@ -328,13 +334,24 @@ LDFLAGS  = -fopenmp
 
 # 并行与库；psmp 必须开 MPI，通常也开 ScaLAPACK
 DFLAGS   = -D__FFTW3 -D__parallel -D__SCALAPACK -D__MPI_VERSION=3
+# toolchain 装了 ELPA / libxsmm 时再加：
+# DFLAGS += -D__ELPA -D__LIBXSMM
 
-# 具体库名取决于 toolchain/MKL 的安装位置
-LIBS     = -lscalapack -lopenblas -lfftw3 -lfftw3_omp`,
+# 具体库名取决于 toolchain/MKL 的安装位置；下面是 OpenBLAS 路线
+LIBS     = -lscalapack -lopenblas -lfftw3 -lfftw3_omp
+
+# MKL 路线（toolchain 生成的文件类似这样，库顺序不要手改）
+# FCFLAGS += -I\${MKLROOT}/include -I\${MKLROOT}/include/fftw
+# LDFLAGS += -L\${MKLROOT}/lib/intel64 -fopenmp
+# LIBS     = -lmkl_gf_lp64 -lmkl_sequential -lmkl_core -lpthread -lm -ldl -lfftw3 -lelpa -lxsmm`,
           },
           {
             type: "p",
             text: "`DFLAGS` 里的 `-D__parallel` 打开 MPI 并行，`-D__SCALAPACK` 启用分布式本征求解，`-D__FFTW3` 用 FFTW 做网格变换。少一个，编出来的二进制可能在运行时才报「未知并行环境」或直接串行跑。`-march=native` 能让编译器针对本机指令集优化，但**跨节点编译**时要确认计算节点 CPU 支持同一指令集，否则会在计算节点上 illegal instruction。",
+          },
+          {
+            type: "p",
+            text: "MKL 路线里 `-lmkl_sequential` 表示 MKL 内部不再开线程，并行交给 MPI/OpenMP，避免与 `OMP_NUM_THREADS` 嵌套超订；`-lmkl_gf_lp64` 是 GNU Fortran 的接口层，用 Intel 编译器时换成 `-lmkl_intel_lp64`。编完不要只看 `make` 成功，用 `ldd exe/local/cp2k.psmp` 确认链接到的是 toolchain 的 MKL/ELPA/libxsmm，而不是系统里的旧 OpenBLAS。",
           },
           {
             type: "callout",
@@ -402,6 +419,10 @@ mpirun -np 64 -x OMP_NUM_THREADS \\
           {
             type: "p",
             text: "核数怎么估？先看节点规格：课程示例是 28 核节点，预编译 ssmp 就直接 `OMP_NUM_THREADS=28`。做 MPI+OpenMP 时，常见起点是**每进程 1–4 线程**：进程多、内存够，SCF 并行好；线程多、进程少，内存省，但扩展性受限于单进程内的并行度。没有万能配比，用 10 步短算例测三组（如 64×1、32×2、16×4），看每步耗时与内存峰值再定。",
+          },
+          {
+            type: "p",
+            text: "三种二进制的典型布局：`ssmp` 单进程、`OMP_NUM_THREADS` 设为节点核数（课程示例 28）；`popt` 纯 MPI，`OMP_NUM_THREADS=1`、`mpirun -np 64`；`psmp` 才用 `mpirun -np 64` 配 `OMP_NUM_THREADS=2`，或 `np 32` 配 `OMP 4`。给 `popt` 设大于 1 的线程数基本不起作用，只会在调度里多占 CPU；纯 MPI 布局就把 `OMP_NUM_THREADS` 固定为 1。",
           },
           {
             type: "p",
@@ -484,7 +505,7 @@ mpirun -np 64 -x OMP_NUM_THREADS \\
           {
             type: "code",
             lang: "bash",
-            title: "四个检查，缺一不可",
+            title: "六个检查，缺一不可",
             text: `# 1) 版本与编译选项
 cp2k.psmp -v
 
@@ -495,7 +516,14 @@ cp2k.psmp -i h2o.inp -o h2o.out 2> h2o.err
 grep -n "PROGRAM ENDED AT" h2o.out
 
 # 4) 能量是有限值，且 SCF 收敛
-grep -nE "Total energy|SCF run converged|SCF run NOT converged" h2o.out | tail -10`,
+grep -nE "Total energy|SCF run converged|SCF run NOT converged" h2o.out | tail -10
+
+# 5) 链接的是 toolchain 的库，不是系统旧库
+ldd "$(command -v cp2k.psmp)" | grep -Ei "mkl|mpi|elpa|xsmm|fftw"
+
+# 6) 两进程 MPI 冒烟：OMP=1 排除线程干扰
+OMP_NUM_THREADS=1 mpirun -np 2 cp2k.psmp -i h2o.inp -o h2o_mpi2.out
+grep -n "PROGRAM ENDED AT" h2o_mpi2.out`,
           },
           {
             type: "p",

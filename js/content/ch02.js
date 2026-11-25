@@ -258,6 +258,11 @@
             caption: "速度更新用到新旧两步的力，所以每步只需存一份力；这也是它比高阶积分器流行的原因。",
           },
           {
+            type: "formula",
+            tex: "T_{\\mathrm{vib}}[\\mathrm{fs}]\\approx\\frac{33356}{\\tilde{\\nu}[\\mathrm{cm}^{-1}]},\\qquad \\Delta t\\le\\frac{T_{\\min}}{20}",
+            caption: "3500 cm⁻¹ 对应约 9.5 fs 的振动周期，除以 20 就是 0.5 fs；水体系常用步长就是这么来的。",
+          },
+          {
             type: "p",
             text: "选步长的经验规则是：**最快振动周期除以 10 到 20**。水分子的 O–H 伸缩在 3300–3600 cm⁻¹，周期约 9–10 fs，除以 20 得到 0.5 fs；重水 O–D 约 2500 cm⁻¹，周期更长，可以用到 1 fs 以上。课程给的经验区间是 0.5–2 fs，手册对含轻原子的 AIMD 建议从 0.5–1.0 fs 起步。",
           },
@@ -297,6 +302,12 @@ awk '$1 ~ /^[0-9]+$/ {
             type: "p",
             text: "漂移多大算可以接受？课程给的参照是：`EPS_SCF 1E-4` 时漂移严重，`1E-5` 在 300 ps 后明显，`1E-6` 与 `1E-7` 几乎看不出。除了 SCF，`CUTOFF` 不足、步长过大、初始结构有近距离接触，也都会表现为能量漂移或温度单向上升。逐项排除，不要只盯着一个参数。",
           },
+          {
+            type: "callout",
+            kind: "info",
+            title: "NVE 验收：看三条，不只看一条",
+            text: "第一，总能量漂移是否随时间单调累积；第二，温度是否单向爬升或塌陷，而不是在目标附近涨落；第三，换一个随机初速度重跑，物理量是否仍在误差内一致。课程给的 SCF 参照是 1E-4 漂移严重、1E-5 在 300 ps 后可见、1E-6 与 1E-7 基本看不出，但仍要用自己的体系实测。",
+          },
         ],
       },
       {
@@ -326,6 +337,15 @@ awk '$1 ~ /^[0-9]+$/ {
           {
             type: "p",
             text: "一个常见误区是「温度曲线平就是好」。如果恒温器耦合太强（`TIMECON` 太小），温度确实会贴着目标线，但速度分布被反复重标，扩散、振动弛豫等动力学量都会被压低。判断标准不是曲线好看，而是**速度分布与相关函数是否合理**。",
+          },
+          {
+            type: "steps",
+            items: [
+              { t: "常规 NVT 生产", d: "CSVR，TIMECON 取 100–200 fs；先用 50 fs 把温度拉到目标，再切到生产值。" },
+              { t: "平衡良好、想少扰动动力学", d: "Nosé–Hoover，TIMECON 给 100 fs 量级，链长用默认；体系很小或远离平衡时改用 CSVR。" },
+              { t: "需要局域热化或显式摩擦", d: "Langevin，注意 GAMMA 会改变扩散系数，算动力学量时要先校准。" },
+              { t: "只升温或退火", d: "速度调节或小 TIMECON 的 CSVR；到达目标温度后必须换回生产恒温器。" },
+            ],
           },
           {
             type: "demo",
@@ -404,7 +424,14 @@ KBLOCK = 100        ! 每 100*NBLOCK 步写 PCDAT/DOSCAR`,
               ["开启 MD", "`IBRION = 0`", "`RUN_TYPE MD`", "CP2K 在 GLOBAL 段"],
               ["总步数", "`NSW`", "`STEPS`", "都是离子步"],
               ["时间步长", "`POTIM`（fs）", "`TIMESTEP`（fs）", "单位相同，不要混用原子单位"],
-              ["初始/目标温度", "`TEBEG`、`TEEND`", "`TEMPERATURE`", "CP2K 没有单独的终止温度；变温要分段或约束"],
+              ["几何优化（固定胞）", "`IBRION = 1/2`、`ISIF = 2`", "`RUN_TYPE GEO_OPT`", "CP2K 的优化器在 `&GEO_OPT`，不是 MD 段"],
+              ["优化加变胞", "`ISIF = 3`", "`RUN_TYPE CELL_OPT` + `&CELL_OPT`", "`ISIF` 同时控制形状与体积，CP2K 在 `&CELL_OPT` 里分开设"],
+              ["外压", "`PSTRESS`（kB）", "`&MD` 的 `PRESSURE`（配合 `&BAROSTAT`）", "单位不同：CP2K 用 bar，填之前先换算"],
+              ["SCF 收敛", "`EDIFF`", "`&SCF EPS_SCF`", "AIMD 常用 1E-6 量级，兼顾漂移与成本"],
+              ["力收敛", "`EDIFFG`", "`&GEO_OPT MAX_FORCE`", "只对优化生效；MD 看能量守恒，不看力收敛"],
+              ["终止温度", "`TEZ`/`TEEND`", "无直接对应", "用分段重启改 `TEMPERATURE`，或改用恒温目标"],
+              ["频率计算", "`IBRION = 5/6`", "`RUN_TYPE VIBRATIONAL_ANALYSIS`", "见第 10 章"],
+              ["初始温度", "`TEBEG`", "`TEMPERATURE`", "在 CP2K 里它同时是恒温目标"],
               ["系综", "`MDALGO` + `SMASS`", "`ENSEMBLE` + `THERMOSTAT`", "VASP 用两个开关组合，CP2K 分开写"],
               ["NVE", "`SMASS = -3`", "`ENSEMBLE NVE`", "NVE 下不写恒温器"],
               ["速度调节/退火", "`SMASS = -1`", "`TEMP_TOL`（过时）或分段控温", "两边都不建议用于生产"],

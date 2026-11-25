@@ -45,8 +45,31 @@
               ["h2o-pos-1.xyz", "每一帧的坐标，多帧串联的 XYZ", "看轨迹、看优化路径"],
               ["h2o-1.restart", "完整输入 + 当前状态，可直接当输入再跑", "续算、改参数接着算"],
               ["h2o-RESTART.wfn", "波函数（密度矩阵），可当初猜", "省掉重新收敛的时间"],
+              ["h2o-1.cell", "每一步的晶胞参数（a b c α β γ）", "只有 CELL_OPT / 变盒 MD 才有"],
+              ["h2o-*.cube", "三维格点数据：电子密度、Hartree 势等", "只在 &PRINT 里开了 cube 类打印时才有"],
+              ["h2o.err", "标准错误流（与 .out 分开重定向时）", "崩溃、被系统杀掉时第一眼看它"],
             ],
             caption: "以 PROJECT h2o 为例，文件名前缀都来自 GLOBAL 里的 PROJECT",
+          },
+          {
+            type: "p",
+            text: "这些文件不是每次都全部出现，而是**跟着 RUN_TYPE 长出来**：单点只写 out 与 restart；优化每个离子步都往前追加一帧 `-pos-1.xyz`；MD 再额外把能量逐行写进 `.ener`；变晶胞才会写 `.cell`。所以拿到一个目录，看有哪些文件，就能反推它跑过什么任务。",
+          },
+          {
+            type: "table",
+            head: ["任务", "新出现的文件", "拿它做什么"],
+            rows: [
+              ["ENERGY / ENERGY_FORCE", "out、-1.restart、RESTART.wfn", "取总能量；给下一步当初猜"],
+              ["GEO_OPT", "-pos-1.xyz（逐帧）、-1.ener", "看优化路径与能量下降，判断有没有卡住"],
+              ["MD", "-pos-1.xyz、-1.ener、-1.restart（含速度）", "算 RDF、MSD、扩散系数"],
+              ["CELL_OPT", "-1.cell、-pos-1.xyz", "看晶格常数是否收敛"],
+              ["打开 &PRINT 的 cube/PDOS", "*.cube、态密度表", "画电荷密度、静电势、PDOS 图"],
+            ],
+            caption: "后处理本身不在这里展开，第 13–15 章专门讲",
+          },
+          {
+            type: "p",
+            text: "还有两个细节值得先记住。`.wfn` 每写一份，程序会把旧的轮转成 `.wfn.bak-1`、`.bak-2`（保留数份后覆盖最早的），所以误删主文件时还有备份。`.err` 只在你自己做了 `2> h2o.err` 重定向时才存在——没重定向时错误信息混在 `.out` 末尾，很多人只 grep 能量就以为没报错。",
           },
           {
             type: "callout",
@@ -371,7 +394,7 @@ cp2k.ssmp -check h2o.inp`,
             type: "table",
             head: ["判据", "在输出里找什么", "不满足说明什么"],
             rows: [
-              ["SCF 收敛", "`*** SCF run converged in N steps ***`", "达到 MAX_SCF 仍未达标，占据与能量都不可信"],
+              ["SCF 收敛", "`SCF run converged in N steps`（输出里首尾带星号）", "达到 MAX_SCF 仍未达标，占据与能量都不可信"],
               ["拿到能量", "`ENERGY| Total FORCE_EVAL ( QS ) energy (a.u.):` 后面那个负数", "任务在 SCF 之前就退出了"],
               ["正常结束", "末尾 `PROGRAM ENDED AT` 与计时表", "被 walltime 杀掉、或中途 ABORT"],
               ["电子数合理", "`Number of electrons:` 与体系价电子数一致", "赝势 q 值或 &DFT 的 CHARGE 设错"],
@@ -454,6 +477,35 @@ tail -60 h2o.out | grep -E "PROGRAM ENDED|warnings|ABORT|ERROR"`,
           },
           {
             type: "code",
+            lang: "cp2k",
+            title: "restart_ext.inp（手写续算：&EXT_RESTART 与顶层节点并列）",
+            text: `&GLOBAL
+  PROJECT h2o_md
+  RUN_TYPE MD
+  PRINT_LEVEL LOW
+&END GLOBAL
+
+&EXT_RESTART
+  RESTART_FILE_NAME ./h2o_md-1.restart
+  RESTART_DEFAULT TRUE      # 位置/速度/晶胞/计数器全读进来
+  RESTART_COUNTERS TRUE     # MD 步数接着编号，而不是从 0 开始
+&END EXT_RESTART
+
+&MOTION
+  &MD
+    ENSEMBLE NVT
+    STEPS 5000              # 这里是「再跑多少步」
+    TIMESTEP 0.5
+    TEMPERATURE 330
+  &END MD
+&END MOTION`,
+          },
+          {
+            type: "p",
+            text: "注意 `&EXT_RESTART` 是**顶层节点**，与 `&GLOBAL`、`&MOTION` 平级，不能塞进 `&FORCE_EVAL`。它不会覆盖你新写的坐标与 `&MOTION` 参数：位置和速度来自旧文件，步数与温度来自新输入——所以「从第 5000 步接着跑 5000 步」是这么写的，而不是改 `STEPS 10000`。",
+          },
+          {
+            type: "code",
             lang: "bash",
             title: "续算的两种起手式",
             text: `# A. 整跑续算：restart 文件就是输入
@@ -469,6 +521,15 @@ grep -n -i "restart" h2o_tzvp.out | head`,
           {
             type: "p",
             text: "最值得养成的习惯是**阶梯式计算**：先用 DZVP 基组把结构收敛，把 `h2o-RESTART.wfn` 拿来当 TZVP 计算的初猜；先用 PBE 收敛，再换 PBE0。同一赝势、同一网格的前提下，初猜越接近解，SCF 步数越少。手册把这套做法列成推荐路线，前提是「便宜那一步已经收敛」。",
+          },
+          {
+            type: "steps",
+            items: [
+              { t: "便宜那一步跑完整", d: "小基组（DZVP-MOLOPT-SR-GTH）+ 便宜泛函（PBE）把几何优化到位，确认 SCF 收敛、受力已降下来。" },
+              { t: "留下波函数，不删目录", d: "`h2o-RESTART.wfn` 是下一步的初猜；同时记下当时的 PROJECT、赝势与 CUTOFF，后面要沿用。" },
+              { t: "换贵参数重开一份输入", d: "只改基组/泛函与 `WFN_RESTART_FILE_NAME`，其余（赝势、网格、`&POISSON`）保持不变——档次不匹配的初猜等于没用。" },
+              { t: "核对 SCF 步数确实变少", d: "新输出里第一步的能量应已接近收敛值；若步数与 ATOMIC 初猜一样，说明 wfn 没读到（见下一段的坑）。" },
+            ],
           },
           {
             type: "callout",

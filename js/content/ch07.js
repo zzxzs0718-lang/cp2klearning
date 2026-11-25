@@ -238,6 +238,30 @@
             text: "`PLUS_U_METHOD` 目前常用 `MULLIKEN`（按 Mulliken 布居投影）。它决定「电子在哪个轨道上」的判定方式，换方法等于换了一套 U 的物理含义，所以**换方法后 U 值不能沿用**。",
           },
           {
+            type: "table",
+            head: ["PLUS_U_METHOD", "投影方式", "什么时候选它"],
+            rows: [
+              ["`MULLIKEN`", "按净原子轨道与重叠布居分配电子", "计算便宜；手册默认值，课程示例都用它"],
+              ["`MULLIKEN_CHARGES`", "改用 Mulliken 毛轨道布居（GOP）", "同样便宜，投影细节与上一行略有差别"],
+              ["`LOWDIN`", "先对角化重叠矩阵再做布居分析", "更贵，但手册说可能比 Mulliken 更稳"],
+              ["`TENSORIAL`", "张量布居分析", "手册只给了这一句定义，用到时以本版本的输入参考为准"],
+            ],
+            caption: "手册里 `PLUS_U_METHOD` 默认就是 `MULLIKEN`；换投影方式等于换了一套 U 的物理含义，U 值必须重新定。",
+          },
+          {
+            type: "p",
+            text: "U 的爬坡机制值得单独记住：SCF 每一轮判断能量变化是否小于 `EPS_U_RAMPING`（手册默认 `1.0E-5`），只有小于才把 U 提高一个 `U_RAMPING`（课程示例用 0.1 eV），直到达到 `U_MINUS_J` 的目标值。这样 SCF 早期是在无 U 的势能面上跑的，比较不容易发散。想让每个 SCF 步骤都重新爬坡（多步任务里常见），加 `INIT_U_RAMPING_EACH_SCF T`；默认 F。",
+          },
+          {
+            type: "list",
+            items: [
+              "PBE 先优化结构：U 会改能量，但一般不改几何趋势，先用便宜泛函把结构定下来",
+              "固定结构扫一组 U（例如 2、4、6、8 eV），看带隙、磁矩、以及 d 电子占据是否「该局域的局域了」",
+              "做线性响应：微扰 d 轨道占据数，用总能量曲率反推 U，这是最有物理依据的一条路",
+              "与实验（带隙、磁化率）或高阶方法（杂化、DMFT）对照，选出能用的一组，并把 U 的来源写进记录",
+            ],
+          },
+          {
             type: "callout",
             kind: "danger",
             title: "U 值不能从别的程序照搬",
@@ -298,6 +322,35 @@
             type: "p",
             text: "老输入里还会看到 `&BS`（broken symmetry）写法：在 `&DFT` 下用 `&ALPHA`/`&BETA` 分别指定自旋向上/向下通道的占据。它比 `MAGNETIZATION` 更底层，适合需要精确控制 t2g/eg 填充的强关联体系；新手优先用 `MAGNETIZATION` + `MULTIPLICITY`。",
           },
+          {
+            type: "code",
+            lang: "cp2k",
+            title: "&BS：分别管住 α 与 β 通道（Fe 的例子）",
+            text: `&DFT
+  UKS T
+  MULTIPLICITY 5
+  &BS T
+    &ALPHA
+      NEL -2 4
+      L 0 2
+      N 4 3
+    &END ALPHA
+    &BETA
+      NEL -2 -4
+      L 0 2
+      N 4 3
+    &END BETA
+  &END BS
+  &XC
+    &XC_FUNCTIONAL PBE
+    &END XC_FUNCTIONAL
+  &END XC
+&END DFT`,
+          },
+          {
+            type: "p",
+            text: "读懂这段的关键是 `NEL` 的含义：它是**相对中性原子的电子数变化**，不是绝对占据数。Fe 的中性组态是 4s²3d⁶；`NEL -2 4` 配上 `L 0 2`、`N 4 3` 就是「4s 减 2 个、3d 加 4 个」。把变化量代入占据数公式（中性占据 + 变化量）/2，α 通道得到 4s 0、3d 5，β 通道得到 4s 0、3d 1，即 3d 共 6 个电子、净自旋 4，对应 `MULTIPLICITY 5`。数字彼此必须自洽，否则 CP2K 会直接报电子数不匹配。",
+          },
         ],
       },
       {
@@ -306,7 +359,7 @@
         blocks: [
           {
             type: "p",
-            text: "杂化泛函把一部分精确交换（HFX）混进 GGA。PBE0 混 25%，写成 `&PBE SCALE_X 0.75` + `&HF FRACTION 0.25`；HSE06 只混**短程**精确交换，长程仍用 PBE，因此对固体更友好、也更便宜。代价是：HFX 要算四中心积分，内存和机时都上一个台阶。",
+            text: "杂化泛函把一部分精确交换（HFX）混进 GGA。PBE0 混 25%，写成 `&PBE SCALE_X 0.75` + `&HF FRACTION 0.25`；HSE06 只混**短程**精确交换，长程仍用 PBE，因此对固体更友好：屏蔽把长程交换消掉，金属和窄带隙体系的误差比全局混的 PBE0 小。代价是：HFX 要算四中心积分，内存和机时都上一个台阶——注意在 CP2K 的高斯基组下，HSE 通常**并不**比 PBE0 便宜（原因见本节表格后的说明）。",
           },
           {
             type: "formula",
@@ -351,6 +404,29 @@
           {
             type: "p",
             text: "什么时候值得上杂化？带隙、缺陷能级、电荷转移激发、以及 PBE 明显低估的反应势垒。什么时候不值得？大金属体系、只需要几何或振动频率、或者你还没做收敛测试——杂化的额外成本会掩盖更基础的错误。课程的建议很实在：先用 PBE 把结构和收敛做对，再拿杂化算单点。",
+          },
+          {
+            type: "table",
+            head: ["泛函", "G2 原子化能 MAE (eV)", "固体带隙 MAE (eV)"],
+            rows: [
+              ["SVWN（LDA）", "5.2", "1.14"],
+              ["LSD / SVWN5", "3.6", "1.14"],
+              ["PBE", "0.73", "1.13"],
+              ["BLYP", "0.31", "—"],
+              ["B3LYP", "0.13", "—"],
+              ["PBE0", "0.21", "—"],
+              ["TPSS", "—", "0.98"],
+              ["HSE", "—", "0.17"],
+            ],
+            caption: "左列是 G2 测试集的原子化能平均绝对误差（Scuseria, JCP 110, 5029 (1999)）；右列是固体带隙误差（JCP 123, 174101 (2005)）。两列来自不同测试集，只用来比较量级，不能互相换算。",
+          },
+          {
+            type: "p",
+            text: "这张表回答了两个常见疑问。第一，**PBE 的带隙误差和 LDA 差不多**（1.13 vs 1.14 eV），所以「LDA 带隙差、换成 PBE 就好了」是错的；真正把带隙误差压下来的是 HSE 这一档（0.17 eV）。第二，**原子化能上 PBE0 反而不如 B3LYP**（0.21 vs 0.13 eV），说明杂化不是「越贵越准」，而是「针对什么性质」。",
+          },
+          {
+            type: "p",
+            text: "在 CP2K 里还有一个与平面波程序不同的成本事实：**HSE 通常并不比 PBE0 便宜**。原因是 CP2K 用高斯基组，短程屏蔽并不能像平面波那样省掉大量四中心积分，两者的 HFX 机时接近。所以选 HSE 的理由应该是「带隙更准、对固体更合适」，不要指望它顺便省机时；真要省机时，用下一节的 ADMM。",
           },
           {
             type: "callout",
@@ -400,6 +476,27 @@
           {
             type: "p",
             text: "三件事缺一不可：杂化泛函（`&HF FRACTION`）、每个 KIND 的 `BASIS_SET AUX_FIT`、以及 `&AUXILIARY_DENSITY_MATRIX_METHOD`。辅助基要跟主基**同族**：MOLOPT 主基配 `BASIS_ADMM_MOLOPT`，UZH 主基配 `BASIS_ADMM_UZH`。辅助基太小，校正项变大、精度下降；太大，加速就没了。`ADMM_TYPE` 里 `ADMMS/ADMMP/ADMMQ` 是较新的模型，`ADMM2` 在后处理流程里支持最广。",
+          },
+          {
+            type: "table",
+            head: ["方法", "四中心积分个数", "金刚石带隙 (eV)"],
+            rows: [
+              ["PBE（PBS）", "—", "4.17"],
+              ["PBE（ABS）", "—", "4.37"],
+              ["PBE0（PBS）", "40,787,850,778,591", "6.07"],
+              ["PBE0（ABS）", "23,561,509,497", "6.25"],
+              ["PBE0 + ADMM1", "24,816,897,009", "6.03"],
+              ["PBE0 + ADMM2", "24,795,460,638", "6.02"],
+            ],
+            caption: "金刚石数据取自 Guidon/Hutter/VandeVondele, JCTC 6, 2348 (2010)。PBS 是周期性 Bloch 求和、ABS 是解析 Bloch 求和；带隙一列说明 ADMM 把成本压下来后精度基本没丢（6.07 → 6.03 eV）。",
+          },
+          {
+            type: "p",
+            text: "辅助基的名字有规律：`FIT3`/`cFIT3`/`pFIT3`/`cpFIT3` 里 `c` 表示收缩、`p` 表示把芯电子单独处理，各有 `aug-` 增广版本，放在 `data/BASIS_ADMM`；过渡金属要换成 `FIT10`（4s3p3d）、`FIT11`（加 1f）、`FIT12`（4s3p4d1f）、`FIT13`（4s4p4d1f），以及对应的收缩版 `cFIT10`–`cFIT13`（在 `BASIS_ADMM_MOLOPT`）。还有一个开关值得知道：`ADMM_PURIFICATION_METHOD` 默认 `MO_DIAG`，手册 desc 直接建议 MD 用它，可选值还有 `NONE`、`CAUCHY`、`CAUCHY_SUBSPACE`、`MO_NO_DIAG`、`MCWEENY`、`NONE_DM`；一般不用动，真遇到拟合不稳再逐个试。",
+          },
+          {
+            type: "p",
+            text: "四条使用边界来自讲稿原文：ADMM **只在 GPW（Quickstep）下实现**；开 `SMEAR` 或做 TDDFPT 时**只能用 ADMM1**；必须从一个已经收敛的 GGA 结果出发；主基与辅助基各自的收敛都要单独检查。违反其中任何一条，得到的加速数字都不可信。",
           },
           {
             type: "p",

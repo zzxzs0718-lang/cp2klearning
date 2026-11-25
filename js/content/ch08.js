@@ -27,7 +27,7 @@
           },
           {
             type: "formula",
-            tex: "\\left[-\\frac{1}{2}\\nabla^2 + V_{ext}(\\mathbf{r}) + V_H[\\rho](\\mathbf{r}) + V_{xc}[\\rho](\\mathbf{r})\\right]\\psi_i = \\varepsilon_i\\psi_i",
+            tex: "(-\\frac{1}{2}\\nabla^2 + V_{ext}(\\mathbf{r}) + V_H[\\rho](\\mathbf{r}) + V_{xc}[\\rho](\\mathbf{r}))\\psi_i = \\varepsilon_i\\psi_i",
             caption: "势里的 ρ 来自上一轮轨道；这个互相依赖就是必须迭代的原因。",
           },
           {
@@ -145,11 +145,28 @@
           },
           {
             type: "p",
-            text: "三个参数值得单独说。`MINIMIZER CG` 是默认且稳健的共轭梯度；`DIIS` 在难收敛时更快但可能不稳，`BROYDEN` 介于两者之间，课程建议「都要测试」。`PRECONDITIONER` 决定轨道更新的「尺度」：`FULL_SINGLE_INVERSE` 是常用默认，`FULL_ALL` 更稳定但更贵；超大体系在 CUDA 版本里还可以试 `PRECOND_SOLVER INVERSE_UPDATE`。",
+            text: "三个参数值得单独说。`MINIMIZER CG` 是手册默认且稳健的共轭梯度；`DIIS` 在难收敛时更快但可能不稳，`BROYDEN` 介于两者之间，课程建议「都要测试」。`PRECONDITIONER` 决定轨道更新的「尺度」：`FULL_SINGLE_INVERSE` 是最常被推荐的写法，`FULL_ALL` 更稳定但更贵（手册的默认值其实是 `FULL_KINETIC`）；超大体系在 CUDA 版本里还可以试 `PRECOND_SOLVER INVERSE_UPDATE`。",
           },
           {
             type: "p",
             text: "`OUTER_SCF` 是 OT 特有的结构：内层 SCF 不必一次收敛，达到 `MAX_SCF` 就退出，外层更新一次预条件器再继续。手册建议内层 `MAX_SCF` 可降到 16–32、外层 8–16，多数体系够用；课程输入给 100/100 是保守写法。`LINESEARCH 2PNT` 比 3PNT 便宜，难收敛时再换 3PNT。",
+          },
+          {
+            type: "table",
+            head: ["关键词", "手册默认", "可选项与取舍"],
+            rows: [
+              ["`MINIMIZER`", "`CG`", "`SD`/`CG`/`DIIS`/`BROYDEN`/`LBFGS`；DIIS 快但可能不稳，LBFGS 适合超大体系"],
+              ["`PRECONDITIONER`", "`FULL_KINETIC`", "`FULL_ALL` 最稳最贵；`FULL_SINGLE_INVERSE` 常用；`NONE` 只用于排查"],
+              ["`LINESEARCH`", "`2PNT`", "`2PNT` 便宜；`3PNT` 大体系更稳；`GOLD` 留给极难收敛；`NONE` 不搜索"],
+              ["`ALGORITHM`", "`STRICT`", "`IRAC` 课程实测比 STRICT 快 5–20%，但稳定性差一些"],
+              ["`ENERGY_GAP`", "`-1`（自动估计）", "给偏小的估计值（如 0.001 Ha）能加速预条件构造"],
+              ["`CHOLESKY`", "`REDUCE`", "注意 `&SCF` 层的 `CHOLESKY` 默认是 `RESTORE`，两处默认不同"],
+            ],
+            caption: "前四行决定「一步更新走多快」，后两行决定「预条件怎么算」；调 OT 一次只动一个。",
+          },
+          {
+            type: "p",
+            text: "课程的取舍很直接：`LINESEARCH` 大多数时候 `2PNT` 就够，大体系再上 `3PNT`，极难收敛的体系才需要 `GOLD`；`ALGORITHM` 想省时间可以试 `IRAC`，但要留意它偶发的振荡。`MINIMIZER` 换 `DIIS` 有时比 `CG` 更快，遇到 SCF 来回跳就退回 `CG`。",
           },
           {
             type: "callout",
@@ -211,7 +228,19 @@
           },
           {
             type: "p",
-            text: "混合参数是这门课里最「手艺」的部分：`ALPHA 0.1` 表示新密度只占 10%，步子小、稳但慢；`BETA 1.5` 是 Broyden 的历史权重；`NBROYDEN 8` 多留几步历史。收敛困难时先降 `ALPHA`（如 0.05），再考虑换 `PULAY_MIXING` 或 `KERKER_MIXING`；不要同时改三个参数，否则你不知道是谁起了作用。",
+            text: "混合参数是这门课里最「手艺」的部分：`ALPHA 0.1` 表示新密度只占 10%，步子小、稳但慢；`BETA 1.5` 是 Kerker 阻尼的分母参数（单位 bohr⁻¹），专门压长波电荷振荡，名字容易让人误以为是 Broyden 的历史权重；`NBROYDEN 8`（也就是 `NBUFFER`）才是「多留几步历史」。收敛困难时先降 `ALPHA`（如 0.05），再考虑换 `PULAY_MIXING` 或 `KERKER_MIXING`；不要同时改三个参数，否则你不知道是谁起了作用。",
+          },
+          {
+            type: "table",
+            head: ["`CHOLESKY` 取值", "含义", "什么时候用"],
+            rows: [
+              ["`OFF`", "不做 Cholesky 分解", "只在小体系或纯调试时"],
+              ["`REDUCE`", "只算需要的块，省分解工作", "`&OT` 层的手册默认值"],
+              ["`RESTORE`", "把结果存下来复用", "`&SCF` 层的手册默认值"],
+              ["`INVERSE`", "直接给出逆矩阵", "对角化路线常用，课程练习就是它"],
+              ["`INVERSE_DBCSR`", "分布式稀疏版本", "大体系省内存，得多核才划算"],
+            ],
+            caption: "同一个名字在 `&SCF` 与 `&OT` 两层有不同默认（`RESTORE` vs `REDUCE`），跨版本迁移输入时要显式写出来。",
           },
           {
             type: "callout",
@@ -258,6 +287,41 @@
               ["MARZARI_VANDERBILT", "冷展宽变体", "同样要做展宽参数收敛"],
             ],
             caption: "展宽越大越容易收敛，但能量与力偏离零温结果越多——必须做参数收敛。",
+          },
+          {
+            type: "code",
+            lang: "cp2k",
+            title: "金属 + 磁矩：一份完整的 &SCF 组合",
+            text: `&DFT
+  UKS T
+  MULTIPLICITY 3
+  &SCF
+    SCF_GUESS ATOMIC
+    EPS_SCF 1.0E-6
+    MAX_SCF 200
+    ADDED_MOS AUTO
+    CHOLESKY INVERSE
+    &SMEAR ON
+      METHOD FERMI_DIRAC
+      ELECTRONIC_TEMPERATURE [K] 500
+    &END SMEAR
+    &DIAGONALIZATION
+      ALGORITHM STANDARD
+      EPS_ADAPT 0.01
+    &END DIAGONALIZATION
+    &MIXING
+      METHOD BROYDEN_MIXING
+      ALPHA 0.1
+      ALPHA_MAG 0.8
+      BETA 1.5
+      NBUFFER 8
+    &END MIXING
+  &END SCF
+&END DFT`,
+          },
+          {
+            type: "p",
+            text: "和上一份片段相比，这里多了三样东西。`MAX_SCF 200` 给足迭代空间——金属常常前 50 步在「晃」；`ALPHA_MAG 0.8` 单独控制**磁化密度**的混合比例（默认 `-1` 表示跟 `ALPHA` 一样），手册说磁性过渡金属用比 `ALPHA` 更大的值（0.8–1.6）通常收敛更快，所以电荷只混 10%、磁矩混 80% 并不矛盾；`CHOLESKY INVERSE` 让每步对角化更便宜。",
           },
           {
             type: "p",

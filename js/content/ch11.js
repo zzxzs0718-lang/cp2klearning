@@ -138,6 +138,22 @@
             text: "每步 SCF 要比静态计算更严。`EPS_SCF` 1E-6 是常用起点；1E-4 会让力带明显噪声，NVE 下很快就能看到总能量漂移。除了阈值，还要给 `MAX_SCF` 留余量，并监控输出里有没有 `SCF run NOT converged`。",
           },
           {
+            type: "table",
+            head: ["参数", "取值", "讲义给出的后果"],
+            rows: [
+              ["步长", "≈0.1 fs", "太小，步数被浪费，同样的物理时间要多花机时"],
+              ["步长", "0.5–2 fs", "合适区间；含氢体系通常取 0.5 fs"],
+              ["步长", "≈5 fs", "太快振动失真，轨迹很快发散"],
+              ["EPS_SCF", "1E-4", "能量漂移严重，NVE 下肉眼可见"],
+              ["EPS_SCF", "1E-5", "跑 300 ps 之后漂移明显"],
+              ["EPS_SCF", "1E-6 / 1E-7", "几百 ps 内几乎看不到漂移，生产用这一档"],
+            ],
+          },
+          {
+            type: "p",
+            text: "这张表回答的是一个常见争论：能量漂移先怪步长还是先怪 SCF。讲义的顺序是两步检查——先把步长压到最快周期的 1/10–1/20，再看 SCF 阈值。两个都改了还漂，才去怀疑外推、泛函或几何本身有问题。",
+          },
+          {
             type: "code",
             lang: "cp2k",
             title: "在 &DFT 里加波函数外推",
@@ -175,6 +191,16 @@
           {
             type: "p",
             text: "升温不要一步到位。可以先把温度设低跑一段，再用 `ANNEALING` 或分段升温到目标值；每换一次温度，重新平衡。平衡段的数据不能拿去做生产平均，判断标准是温度、势能与关键结构量不再有单调漂移。",
+          },
+          {
+            type: "callout",
+            kind: "key",
+            title: "平衡的判据只有一个：势能不再单调",
+            text: "讲义的原话是「势能在一个区间震荡平衡，代表体系达到平衡态」。温度是瞬时估计，单帧到 300 K 不算平衡；要看滑动平均与势能曲线。文献里常见的做法是**把前几 ps 直接丢掉**：300 K 跑 20 ps 就弃前 5 ps；另一案例跑 80 ps 只用最后 60 ps，等于用 20 ps 做平衡。材料类工作常拿「结构不垮塌 + 势能稳定」当稳定性判据，那只是必要条件。",
+          },
+          {
+            type: "p",
+            text: "生产段长度没有通用数字，但有两条硬约束：覆盖你要研究的慢过程的自相关时间，并且能做块平均误差估计。MD 有混沌效应，同一套输入两次启动也会给出不同轨迹，报扩散系数、配位数这类量时最好是多次独立模拟的统计平均，而不是一条长轨迹切几段。",
           },
           {
             type: "code",
@@ -238,7 +264,36 @@
           },
           {
             type: "p",
-            text: "如果约束的是一个集体变量而不是单个原子，用 `&CONSTRAINT/&COLLECTIVE`，配 `&SUBSYS/&COLVAR` 定义距离、配位数或组合变量。约束 MD、拉格朗日乘子与自由能积分是下一章的主题；这一章只需要知道固定原子与约束 MD 是两套不同机制。",
+            text: "如果约束的不是单个原子，而是一个集体变量（CV），用 `&MOTION/&CONSTRAINT/&COLLECTIVE`：先在 `&SUBSYS/&COLVAR` 里定义距离、配位数或组合变量，再在 `&COLLECTIVE` 里按 CV 的**输入顺序**引用它，用 `TARGET` 指定要固定的值。这就是常说的限制性动力学（constrained AIMD）。",
+          },
+          {
+            type: "code",
+            lang: "cp2k",
+            title: "把某个距离固定在 2.2 Å",
+            text: `&FORCE_EVAL
+  &SUBSYS
+    &COLVAR
+      &DISTANCE
+        ATOMS 12 45
+      &END DISTANCE
+    &END COLVAR
+  &END SUBSYS
+&END FORCE_EVAL
+&MOTION
+  &CONSTRAINT
+    &COLLECTIVE
+      COLVAR 1
+      TARGET [angstrom] 2.2
+    &END COLLECTIVE
+    &LAGRANGE_MULTIPLIERS ON
+      FILENAME constraint_force
+    &END LAGRANGE_MULTIPLIERS
+  &END CONSTRAINT
+&END MOTION`,
+          },
+          {
+            type: "p",
+            text: "`&LAGRANGE_MULTIPLIERS` 写出的乘子就是维持约束所需的广义力：体系想沿 CV 走，约束把它拽回来，拽的力度记在 λ 里。对距离型 CV，$-\\langle\\lambda\\rangle$ 就是平均力 $\\mathrm{d}A/\\mathrm{d}\\xi$，沿 CV 积分即得 PMF——这就是 blue-moon 的思想。实操上要**对每个目标值单独跑一条约束 MD**（窗口），取 λ 的系综平均，再沿 CV 积分；窗口数量、加密位置与单位换算在第 12 章展开，这里只要记住两点：固定原子与约束 CV 是两套机制，以及 λ 本身不是自由能。",
           },
         ],
       },
